@@ -116,3 +116,6 @@ def _solve_F_given_fdp_snr(fdp0=0.05, snr=3, Npsrs=None, sky_ave=False):
     return sopt.fsolve(lambda F :fdp(F, snr, Npsrs=Npsrs, sky_ave=sky_ave)-fdp0, F0)
 
 def _solve_snr_given_fdp_F(fdp0=0.05, F=3, Npsrs=None, sky_ave=False):
+    Npsrs = 1 if Npsrs is None else Npsrs
+    snr0 = np.sqrt(2*F-4*Npsrs)
+    return sopt.fsolve(lambda snr :fdp(F, snr, Npsrs=Npsrs, sky_ave=sky_ave)-fdp0, snr0)
