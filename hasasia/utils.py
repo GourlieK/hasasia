@@ -39,6 +39,7 @@ def create_design_matrix(toas, RADEC=False, PROPER=False, PX=False):
 
    """
     model = ['QSD', 'QSD', 'QSD']
+    #If true, then will add it to the list of the models
     if RADEC:
         model.append('RA')
         model.append('DEC')
@@ -49,21 +50,25 @@ def create_design_matrix(toas, RADEC=False, PROPER=False, PX=False):
         model.append('PX')
 
     ndim = len(model)
-    designmatrix = np.zeros((len(toas), ndim))
+    #creates a design matrix with rows of time of arrivals and columns of models
+    designmatrix = np.zeros((len(toas), ndim))  
 
+    #for-loop for the rows
     for ii in range(ndim):
         if model[ii] == 'QSD': #quadratic spin down fit
-            designmatrix[:,ii] = toas**(ii) #Cute
+            designmatrix[:,ii] = toas**(ii) #Cute.  Replaces rows of column ii with TOA to the power of ii. Why?
         if model[ii] == 'RA':
-            designmatrix[:,ii] = np.sin(2*np.pi/yr_sec*toas)
+            designmatrix[:,ii] = np.sin(2*np.pi/yr_sec*toas)  #sin(2*pi*t*w)
         if model[ii] == 'DEC':
-            designmatrix[:,ii] = np.cos(2*np.pi/yr_sec*toas)
+            designmatrix[:,ii] = np.cos(2*np.pi/yr_sec*toas)  #cos(2*pi*t*w)
         if model[ii] == 'PRA':
-            designmatrix[:,ii] = toas*np.sin(2*np.pi/yr_sec*toas)
+            designmatrix[:,ii] = toas*np.sin(2*np.pi/yr_sec*toas)  #t*sin(2*pi*t*w)
         if model[ii] == 'PDEC':
-            designmatrix[:,ii] = toas*np.cos(2*np.pi/yr_sec*toas)
+            designmatrix[:,ii] = toas*np.cos(2*np.pi/yr_sec*toas)   #t*cos(2*pi*t*w)
         if model[ii] == 'PX':
-            designmatrix[:,ii] = np.cos(4*np.pi/yr_sec*toas)
+            designmatrix[:,ii] = np.cos(4*np.pi/yr_sec*toas)       #cos(4*pi*t*w)
+
+    #Each entry appears to be linearly independent. Was this the goal, or purpose?
 
     return designmatrix
 
@@ -111,6 +116,3 @@ def _solve_F_given_fdp_snr(fdp0=0.05, snr=3, Npsrs=None, sky_ave=False):
     return sopt.fsolve(lambda F :fdp(F, snr, Npsrs=Npsrs, sky_ave=sky_ave)-fdp0, F0)
 
 def _solve_snr_given_fdp_F(fdp0=0.05, F=3, Npsrs=None, sky_ave=False):
-    Npsrs = 1 if Npsrs is None else Npsrs
-    snr0 = np.sqrt(2*F-4*Npsrs)
-    return sopt.fsolve(lambda snr :fdp(F, snr, Npsrs=Npsrs, sky_ave=sky_ave)-fdp0, snr0)
