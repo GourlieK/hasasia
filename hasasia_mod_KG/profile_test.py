@@ -3,7 +3,7 @@
 import numpy as np
 import scipy.linalg as sl
 import matplotlib.pyplot as plt
-import glob, pickle, json, cProfile, pstats, psutil, sys, os
+import glob, pickle, json, cProfile, pstats, os, time
 import matplotlib as mpl
 import healpy as hp
 import astropy.units as u
@@ -12,32 +12,30 @@ mpl.rcParams['figure.dpi'] = 300
 mpl.rcParams['figure.figsize'] = [5,3]
 mpl.rcParams['text.usetex'] = True
 from enterprise.pulsar import Pulsar as ePulsar
-from memory_profiler import profile, LogFile
-
-
-sys.path.append('/home/gourliek/hasasia_clone/hasasia')
-import hasasia.sensitivity as hsen
-import hasasia.sim as hsim
-import hasasia.skymap as hsky
-
+from memory_profiler import profile
 
 
 
 #memory profile files
 path = r'/home/gourliek/Desktop/Profile_Data'
 os.mkdir(path)
-corr_matrix_mem = open(path + '/corr_matrix_mem_profiler.log','w+')
-sens_mem = open(path + '/sens_mem_profiler.log','w+')
-h_spectra_mem = open(path + '/h_spectra_profiler.log','w+')
+corr_matrix_mem = open(path + '/corr_matrix_mem.txt','w')
+sens_mem = open(path + '/sens_mem.txt','w')
+h_spectra_mem = open(path + '/h_spectra_mem.txt','w')
+time_increments = open(path + '/psr_increm.txt','w')
 
 
 
-
-
+#using modified imports
+import sensitivity as hsen
+import sim as hsim
+import skymap as hsky
+from sensitivity import get_NcalInv_mem, corr_from_psd_mem
+################################################################################################################
+################################################################################################################
+################################################################################################################
 def get_psrname(file,name_sep='_'):
     return file.split('/')[-1].split(name_sep)[0]
-
-
 
 def pulsar_class(parameters, timons):
     enterprise_Psrs = []
@@ -54,10 +52,8 @@ def pulsar_class(parameters, timons):
             break
     return enterprise_Psrs
 
-
 @profile(stream = corr_matrix_mem)
 def make_corr(psr):
-    corr_matrix_mem.write(f'Pulsar: {psr.name}\n')
     N = psr.toaerrs.size
     corr = np.zeros((N,N))
     _, _, fl, _, bi = hsen.quantize_fast(psr.toas,psr.toaerrs,
@@ -81,12 +77,13 @@ def make_corr(psr):
     corr = np.diag(sigma_sqr) + J #ISSUE HERE WHEN RUNNING J1713
     return corr
 
-
 @profile(stream=sens_mem)
 def array_contruction(epsrs):
     psrs = []
-    thin = 1
     for ePsr in epsrs:
+        corr_matrix_mem.write(f'Pulsar: {ePsr.name}\n')
+        get_NcalInv_mem.write(f'Pulsar: {ePsr.name}\n')
+        corr_from_psd_mem.write(f'Pulsar: {ePsr.name}\n')
         #it is dying here
         corr = make_corr(ePsr)[::thin,::thin]
         plaw = hsen.red_noise_powerlaw(A=9e-16, gamma=13/3., freqs=freqs)
@@ -104,19 +101,18 @@ def array_contruction(epsrs):
         del ePsr
     return psrs
 
-
 @profile(stream=h_spectra_mem)
 def hasasia_spectrum(pulsars):
     Specs = []
     for p in pulsars:
+        start_time = time.time()
         sp = hsen.Spectrum(p, freqs=freqs)
         _ = sp.NcalInv
         Specs.append(sp)
+        end_time = time.time()
+        time_increments.write(f"{p.name} {start_time-null_time} {end_time-null_time}\n")
         print('\rPSR {0} complete'.format(p.name),end='',flush=True)
     return Specs
-
-
-
 
 def yr_11_data():
     
@@ -149,9 +145,6 @@ def yr_11_data():
     else:
         print("ERROR. Filteration of tim and par files performed incorrectly")
         exit()
- 
-
-
 
     noise = {}
     for nf in noise_files:
@@ -170,11 +163,7 @@ def yr_11_data():
            'J1909-3744':[10**-13.9429, 2.38219],
            'J2145-0750':[10**-12.6893, 1.32307],
            }
-    
-
     return psr_list, pars, tims, noise, rn_psrs
-
-
 
 def yr_12_data():
     data_dir = r'/home/gourliek/Nanograv/12p5yr_stochastic_analysis-master/data/'
@@ -187,8 +176,6 @@ def yr_12_data():
     par_files.remove(par_files[21])
     tim_files = sorted(glob.glob(tim_dir+'*.tim'))
 
-
-
     #lists used
     par_name_list = []   #pulsar names generated from the .par files
     tim_name_list = []   #pulsar names generated from the .tim files
@@ -200,14 +187,10 @@ def yr_12_data():
     #list of dictionaries of the red noise parameters in form: NAME: (log_10_A, gamma)
     raw_white_noise = []     #future list of white noise values. Could be a branch within a branch to where a specific type can be chosen
 
-
-
     #Uploading noise JSON file and loading it to the noise dictionary
     with open(noise_file,'r') as line:
             noise.update(json.load(line))
     noise_labels = sorted(list(noise.keys()))   #don't use np.unique here cause it is a dictionary key
-
-
 
     #Grabbing pulsar names from .par, .tim, and noise .JSON files
     for par_name in par_files:
@@ -222,8 +205,6 @@ def yr_12_data():
     #This is required to remove all redundent pulsar names, and re-organize it as a sorted list
     noise_name_list = np.unique(noise_name_list)
 
-
-
     #Finds intersection between three lists. I had to do it this way and not the more efficent way from down below due to a duplicate name
     for i in range(len(par_name_list)):
         for j in range(len(tim_name_list)):
@@ -231,21 +212,15 @@ def yr_12_data():
                 if par_name_list[i] == tim_name_list[j] and tim_name_list[j] == noise_name_list[k]:   #The intersection between all three lists
                     psr_name_list.append(par_name_list[i])
 
-
-
     #removes any duplicates using set, rewrites it as a list, and organizes the list
     psr_name_list = np.unique(psr_name_list)
     #This value is a standard number of 45 used repeatedly throughout the code.
     num = len(psr_name_list)
 
-
-
     #removing files so that the data only contains pulsars that they both have info on
     par_files = [f for f in par_files if get_psrname(f) in psr_name_list]
     tim_files = [f for f in tim_files if get_psrname(f) in psr_name_list]
     #try to figure out a way to filer the noise dictionaries here
-
-
 
     for i in range(num):
         for noise_label in noise_labels:  
@@ -264,7 +239,6 @@ def yr_12_data():
             else:
                 print(f"Star {get_psrname(noise_label)} is not found in the .tim or .par files")
 
-
     raw_white_noise = np.unique(raw_white_noise)
     
     #organization of noises
@@ -280,16 +254,16 @@ def yr_12_data():
         red_noise.append(red_item)
         white_noise.append({psr_name_list[i]: stor})
 
-
-
     return par_files, tim_files, noise, psr_name_list, red_noise, white_noise
 
 
-
-
-
+################################################################################################################
+################################################################################################################
+################################################################################################################
 if __name__ == '__main__':
-    kill_count = 3
+    null_time = time.time()
+    kill_count = 8
+    thin = 1
     #code under this is profiled
     with cProfile.Profile() as pr:
         psr_list, pars, tims, noise, rn_psrs = yr_11_data()
@@ -304,9 +278,9 @@ if __name__ == '__main__':
             stats.sort_stats(pstats.SortKey.TIME)
             stats.print_stats()
 
-    corr_matrix_mem.close()
-    sens_mem.close()
-    h_spectra_mem.close()
+    #corr_matrix_mem.close()
+    #sens_mem.close()
+    #h_spectra_mem.close()
         #for sp,p in zip(specs,Psrs):
             #plt.loglog(sp.freqs,sp.h_c,lw=2,label=p.name)
         
@@ -314,9 +288,3 @@ if __name__ == '__main__':
         #plt.legend()
         #plt.show()
         #plt.close()'''
-
-   
-
-
-
-  
