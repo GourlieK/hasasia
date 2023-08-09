@@ -7,12 +7,20 @@ import scipy.stats as sps
 import scipy.linalg as sl
 import os, pickle
 from astropy import units as u
-
 import hasasia
-from .utils import create_design_matrix
+#changed from .utils
+from utils import create_design_matrix
 
 current_path = os.path.abspath(hasasia.__path__[0])
 sc_dir = os.path.join(current_path,'sensitivity_curves/')
+
+
+
+#KG changes:
+from memory_profiler import profile
+path = r'/home/gourliek/Desktop/Profile_Data'
+get_NcalInv_mem = open(path + '/NcalInv_mem.txt','w')
+corr_from_psd_mem = open(path + '/corr_from_psd_mem.txt','w')
 
 __all__ =['GWBSensitivityCurve',
           'DeterSensitivityCurve',
@@ -181,6 +189,7 @@ def get_Tf(designmatrix, toas, N=None, nf=200, fmin=None, fmax=2e-7,
 
     return np.real(Tmat), ff, T
 
+@profile(stream = get_NcalInv_mem)
 def get_NcalInv(psr, nf=200, fmin=None, fmax=2e-7, freqs=None,
                 exact_yr_freqs = False, full_matrix=False,
                 return_Gtilde_Ncal=False, tm_fit=True, Gmatrix=None):
@@ -1034,6 +1043,7 @@ def get_TspanIJ(psr1,psr2):
     stop = np.amin([psr1.toas.max(),psr2.toas.max()])
     return stop - start
 
+@profile(stream = corr_from_psd_mem)
 def corr_from_psd(freqs, psd, toas, fast=True):
     """
     Calculates the correlation matrix over a set of TOAs for a given power

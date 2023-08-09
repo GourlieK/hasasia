@@ -5,7 +5,8 @@ import numpy as np
 import scipy.special as spec
 import astropy.units as u
 import astropy.constants as c
-from .sensitivity import DeterSensitivityCurve, resid_response, get_dt
+#changed from .sensitivity
+from sensitivity import DeterSensitivityCurve, resid_response, get_dt
 
 __all__ = ['SkySensitivity',
            'h_circ',

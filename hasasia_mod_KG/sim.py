@@ -2,8 +2,9 @@
 from __future__ import print_function
 """Main module."""
 import numpy as np
-from .sensitivity import Pulsar, red_noise_powerlaw, corr_from_psd
-from .utils import create_design_matrix
+#changed from .sensitity and .utils
+from sensitivity import Pulsar, red_noise_powerlaw, corr_from_psd
+from utils import create_design_matrix
 __all__ = ['sim_pta',
            ]
 
