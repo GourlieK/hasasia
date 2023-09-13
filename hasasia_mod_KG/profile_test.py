@@ -23,6 +23,7 @@ corr_matrix_mem = open(path + '/corr_matrix_mem.txt','w')
 sens_mem = open(path + '/sens_mem.txt','w')
 h_spectra_mem = open(path + '/h_spectra_mem.txt','w')
 time_increments = open(path + '/psr_increm.txt','w')
+Ncal_time_file = open(path + '/Ncal_meth_time.txt','w')
 
 
 
@@ -61,7 +62,7 @@ def make_corr(psr):
     keys = [ky for ky in noise.keys() if psr.name in ky]
     backends = np.unique(psr.flags['f'])
     sigma_sqr = np.zeros(N)
-    ecorrs = np.zeros_like(fl,dtype=float)
+    ecorrs = np.zeros_like(fl,dtype=np.float32)
     for be in backends:
         mask = np.where(psr.flags['f']==be)
         key_ef = '{0}_{1}_{2}'.format(psr.name,be,'efac')
@@ -69,6 +70,8 @@ def make_corr(psr):
         sigma_sqr[mask] = (noise[key_ef]**2 * (psr.toaerrs[mask]**2)
                            + (10**noise[key_eq])**2)
         mask_ec = np.where(fl==be)
+        #KG jax mod.
+        #mask_ec = np.where(np.atleast_1d(fl == be).nonzero())
         key_ec = '{0}_{1}_log10_{2}'.format(psr.name,be,'ecorr')
         ecorrs[mask_ec] = np.ones_like(mask_ec) * (10**noise[key_ec])
     j = [ecorrs[ii]**2*np.ones((len(bucket),len(bucket)))
@@ -262,6 +265,7 @@ def yr_12_data():
 ################################################################################################################
 if __name__ == '__main__':
     null_time = time.time()
+    Ncal_time_file.write(f'{null_time}\n')
     kill_count = 8
     thin = 1
     #code under this is profiled
@@ -278,13 +282,10 @@ if __name__ == '__main__':
             stats.sort_stats(pstats.SortKey.TIME)
             stats.print_stats()
 
-    #corr_matrix_mem.close()
-    #sens_mem.close()
-    #h_spectra_mem.close()
         #for sp,p in zip(specs,Psrs):
             #plt.loglog(sp.freqs,sp.h_c,lw=2,label=p.name)
         
 
         #plt.legend()
         #plt.show()
-        #plt.close()'''
+        #plt.close()
