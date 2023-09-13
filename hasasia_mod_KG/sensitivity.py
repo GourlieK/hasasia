@@ -9,6 +9,7 @@ import scipy.stats as sps
 import scipy.linalg as sl
 import os, pickle
 from astropy import units as u
+
 import hasasia
 
 
@@ -278,36 +279,12 @@ def get_NcalInv(psr, nf=200, fmin=None, fmax=2e-7, freqs=None,
     Gtilde = np.dot(np.exp(1j*2*np.pi*ff[:,np.newaxis]*toas),G)
     # N_freq x N_TOA-N_par
 
-
-
-    #KG: origonal method
-    start_time_og = time.time()
+   #KG: origonal method
+    start_time_og = time.time() 
     Ncal = np.matmul(G.T,np.matmul(psr.N,G)) #N_TOA-N_par x N_TOA-N_par
     NcalInv = np.linalg.inv(Ncal) #N_TOA-N_par x N_TOA-N_par
     end_time_og = time.time()
     Ncal_time_file.write(f'Origonal: ({start_time_og},{end_time_og})\n')
-    del Ncal, NcalInv
-
-    #KG: origonal jax method
-    start_time_og_jnp = time.time()
-    Ncal = jnp.matmul(G.T,np.matmul(psr.N,G)) #N_TOA-N_par x N_TOA-N_par
-    NcalInv = jnp.linalg.inv(Ncal) #N_TOA-N_par x N_TOA-N_par
-    end_time_og_jnp = time.time()
-    Ncal_time_file.write(f'Origonal Jax: ({start_time_og_jnp},{end_time_og_jnp})\n')
-    del Ncal, NcalInv
-
-    #KG: cholesky decomposition of covariance matrix method
-    start_time_chol = time.time()
-    L = jsc.linalg.cholesky(psr.N)            
-    A = jnp.matmul(L,G)
-    del L
-    Ncal = jnp.matmul(A.T,A)
-    del A
-    NcalInv = jnp.linalg.inv(Ncal)
-    end_time_chol = time.time()
-    Ncal_time_file.write(f'Modified: ({start_time_chol},{end_time_chol})\n')
-
-    
 
     TfN = np.matmul(np.conjugate(Gtilde),np.matmul(NcalInv,Gtilde.T)) / 2
     if return_Gtilde_Ncal:
@@ -462,6 +439,7 @@ class Spectrum(object):
                                   freqs=self.freqs, from_G=True, Gmatrix=self.G,
                                   **self.Tf_kwargs)
         return self._Tf
+
 
     @property
     def NcalInv(self):
