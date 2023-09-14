@@ -2,6 +2,7 @@
 from __future__ import print_function
 """Main module."""
 import numpy  as np
+import jax
 import jax.numpy as jnp
 import jax.scipy as jsc
 import itertools as it
@@ -196,6 +197,19 @@ def get_Tf(designmatrix, toas, N=None, nf=200, fmin=None, fmax=2e-7,
 
     return np.real(Tmat), ff, T
 
+#KG change: function to test jax.jit
+def method(N,G):
+    L = jsc.linalg.cholesky(N) 
+    del N           
+    A = jnp.matmul(L,G)
+    del L
+    Ncal = jnp.matmul(A.T,A)
+    del A
+    NcalInv = jnp.linalg.inv(Ncal)
+    return Ncal, NcalInv
+
+method_jit = jax.jit(method)
+
 #KG: added profile decorator to gather memory data
 @profile(stream = get_NcalInv_mem)
 def get_NcalInv(psr, nf=200, fmin=None, fmax=2e-7, freqs=None,
@@ -280,12 +294,8 @@ def get_NcalInv(psr, nf=200, fmin=None, fmax=2e-7, freqs=None,
 
     #KG: cholesky decomposition of covariance matrix method
     start_time_chol = time.time()
-    L = jsc.linalg.cholesky(psr.N)            
-    A = jnp.matmul(L,G)
-    del L
-    Ncal = jnp.matmul(A.T,A)
-    del A
-    NcalInv = jnp.linalg.inv(Ncal)
+    N = psr.N
+    Ncal, NcalInv = method_jit(N,G)
     end_time_chol = time.time()
     Ncal_time_file.write(f'Cholesky: ({start_time_chol},{end_time_chol})\n')
 
