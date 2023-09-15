@@ -3,7 +3,7 @@
 import numpy as np
 import scipy.linalg as sl
 import matplotlib.pyplot as plt
-import glob, pickle, json, cProfile, pstats, os, time
+import glob, pickle, json, cProfile, pstats, os, time, psutil
 import matplotlib as mpl
 import healpy as hp
 import astropy.units as u
@@ -279,7 +279,7 @@ if __name__ == '__main__':
         specs = hasasia_spectrum(Psrs)
         with open(path + '/test_time.txt', "w") as file:
             stats = pstats.Stats(pr, stream=file)
-            stats.sort_stats(pstats.SortKey.TIME)
+            stats.sort_stats(pstats.SortKey.CUMULATIVE)
             stats.print_stats()
 
         #for sp,p in zip(specs,Psrs):

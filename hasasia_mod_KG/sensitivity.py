@@ -9,7 +9,7 @@ import scipy.stats as sps
 import scipy.linalg as sl
 import os, pickle
 from astropy import units as u
-import hasasia
+import hasasia, psutil
 
 
 

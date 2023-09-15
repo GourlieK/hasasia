@@ -1,7 +1,6 @@
 import time, os, subprocess, random
 import matplotlib.pyplot as plt
 import numpy  as np
-from matplotlib.legend_handler import HandlerTuple
 
 
 
@@ -84,40 +83,6 @@ if __name__ == '__main__':
 
 
 
-    data = []
-    OG = []
-    OG_jax = []
-    OG_mod = []
-    with open(psrs_name_path + '/Ncal_meth_time.txt', 'r') as file:
-        for line in file:
-            line = line.strip('\n')
-            data.append(line)
-
-    null_time = float(data[0])
-    del data[0]
-
-    for line in data:
-        line = line.split(':')
-        if str(line[0]) == 'Origonal':
-            num = line[1]
-            nums = num.split(',')
-            new_0 = nums[0].replace("(", "")
-            new_1 = nums[1].replace(")", "")
-            OG.append([float(new_0),float(new_1)])
-
-        if str(line[0]) == 'Origonal Jax':
-            num = line[1]
-            nums = num.split(',')
-            new_0 = nums[0].replace("(", "")
-            new_1 = nums[1].replace(")", "")
-            OG_jax.append([float(new_0),float(new_1)])
-
-        if str(line[0]) == 'Modified':
-            num = line[1]
-            nums = num.split(',')
-            new_0 = nums[0].replace("(", "")
-            new_1 = nums[1].replace(")", "")
-            OG_mod.append([float(new_0),float(new_1)]) 
                   
     #opening the recently saved data text file
     with open(psrs_name_path + '/time_mem_data.txt', 'r') as file:
@@ -170,63 +135,6 @@ if __name__ == '__main__':
     plt.axvline(x = 0, color = 'black')
     plt.xlim(time_data[0]-1, time_data[-1]+1)
     plt.savefig(psrs_name_path+'/colored_mem_time.png') 
-    plt.show()
-
-
-    x_vals_OG = []
-    y_vals_OG = []
-    x_vals_OG_jax = []
-    y_vals_OG_jax = []
-    x_vals_OG_mod = []
-    y_vals_OG_mod = []
-
-    for i in range(len(OG)):
-        OG_val_1 = OG[i][0] - null_time
-        OG_val_2 = OG[i][1] - null_time
-        index_OG = np.where((time_data >= OG_val_1) & (time_data <= OG_val_2))
-        x_vals_OG.append(time_data[index_OG])
-        y_vals_OG.append(mem_data[index_OG]) 
-
-        OG_jax_val_1 = OG_jax[i][0] - null_time
-        OG_jax_val_2 = OG_jax[i][1] - null_time
-        index_OG_jax = np.where((time_data >= OG_jax_val_1) & (time_data <= OG_jax_val_2))
-        x_vals_OG_jax.append(time_data[index_OG_jax])
-        y_vals_OG_jax.append(mem_data[index_OG_jax]) 
-
-        OG_mod_val_1 = OG_mod[i][0] - null_time
-        OG_mod_val_2 = OG_mod[i][1] - null_time
-        index_OG_mod = np.where((time_data >= OG_mod_val_1) & (time_data <= OG_mod_val_2))
-        x_vals_OG_mod.append(time_data[index_OG_mod]) 
-        y_vals_OG_mod.append(mem_data[index_OG_mod]) 
-
-
-
-
-
-
-
-
-    
-    handles = []
-    labels = ['Original', 'Original with Jax', 'Modified']
-
-    for i in range(len(x_vals_OG)):
-        orig_line, = plt.plot(x_vals_OG[i], y_vals_OG[i], c='black')
-        jax_line, = plt.plot(x_vals_OG_jax[i], y_vals_OG_jax[i], c='red')
-        mod_line, = plt.plot(x_vals_OG_mod[i], y_vals_OG_mod[i], c='blue')
-        
-        handles.append(orig_line)  # Appending any of the lines for the legend
-
-    # Create legend with proxy artists
-    plt.title(f"Memory vs Time of {len(increms)} Pulsars")
-    plt.legend(handles, labels, handler_map={tuple: HandlerTuple(ndivide=None)})
-    plt.grid()
-    plt.axhline(y=0, color = 'black')
-    plt.axvline(x = 0, color = 'black')
-    plt.xlabel('time [s]')
-    plt.ylabel('RAM memory usage [MB]')
-    plt.xlim(time_data[0]-1, time_data[-1]+1)
-    plt.savefig(psrs_name_path+'/meth_mem_time.png') 
     plt.show()
 
 
