@@ -3,7 +3,7 @@
 import numpy as np
 import scipy.linalg as sl
 import matplotlib.pyplot as plt
-import glob, pickle, json, cProfile, pstats, os, time, psutil
+import glob, pickle, json, cProfile, pstats, os, time, psutil, h5py, h5format, gc
 import matplotlib as mpl
 import healpy as hp
 import astropy.units as u
@@ -24,6 +24,10 @@ sens_mem = open(path + '/sens_mem.txt','w')
 h_spectra_mem = open(path + '/h_spectra_mem.txt','w')
 time_increments = open(path + '/psr_increm.txt','w')
 Ncal_time_file = open(path + '/Ncal_meth_time.txt','w')
+#psrs_f = h5py.File(path + '/psrs.hdf5', 'w')
+
+
+
 
 
 
@@ -35,20 +39,24 @@ from sensitivity import get_NcalInv_mem, corr_from_psd_mem
 ################################################################################################################
 ################################################################################################################
 ################################################################################################################
+
+
+
 def get_psrname(file,name_sep='_'):
     return file.split('/')[-1].split(name_sep)[0]
 
 def pulsar_class(parameters, timons):
-    enterprise_Psrs = []
-    count = 1
-    
+    enterprise_Psrs = []      
+    count = 0
     for par,tim in zip(parameters,timons):
-        if count <= kill_count:
+        if count < kill_count:
+
+            #creation of enterprise pulsar from parameter and timing files
             ePsr = ePulsar(par, tim,  ephem='DE436')
             enterprise_Psrs.append(ePsr)
             print('\rPSR {0} complete'.format(ePsr.name),end='',flush=True)
-            print(f'\n{count} pulsars created')
             count +=1
+            print(f'\n{count} pulsars created')
         else:
             break
     return enterprise_Psrs
@@ -82,40 +90,80 @@ def make_corr(psr):
 
 @profile(stream=sens_mem)
 def array_contruction(epsrs):
-    psrs = []
+    psrs_names = []
+    h_c_list = []
+    freqs_list = []
     for ePsr in epsrs:
         corr_matrix_mem.write(f'Pulsar: {ePsr.name}\n')
         get_NcalInv_mem.write(f'Pulsar: {ePsr.name}\n')
         corr_from_psd_mem.write(f'Pulsar: {ePsr.name}\n')
+        start_time = time.time()
         #it is dying here
+        #create white noise covariance matrix from enterpreise pulsar
         corr = make_corr(ePsr)[::thin,::thin]
         plaw = hsen.red_noise_powerlaw(A=9e-16, gamma=13/3., freqs=freqs)
         if ePsr.name in rn_psrs.keys():
             Amp, gam = rn_psrs[ePsr.name]
             plaw += hsen.red_noise_powerlaw(A=Amp, gamma=gam, freqs=freqs)
+
+        #adding red noise components to the noise covariance matrix
         corr += hsen.corr_from_psd(freqs=freqs, psd=plaw,
-                                    toas=ePsr.toas[::thin])
+                                    toas=ePsr.toas[::thin])   
+        
         psr = hsen.Pulsar(toas=ePsr.toas[::thin],
                             toaerrs=ePsr.toaerrs[::thin],
                             phi=ePsr.phi,theta=ePsr.theta, 
                             N=corr, designmatrix=ePsr.Mmat[::thin,:])
         psr.name = ePsr.name
-        psrs.append(psr)
+        psr_name = psr.name
         del ePsr
-    return psrs
+        print(f"Hasasia Pulsar {psr.name} created\n")
+        psrs_names.append(psr.name)
 
-@profile(stream=h_spectra_mem)
-def hasasia_spectrum(pulsars):
-    Specs = []
-    for p in pulsars:
-        start_time = time.time()
-        sp = hsen.Spectrum(p, freqs=freqs)
-        _ = sp.NcalInv
-        Specs.append(sp)
+        spec_psr = hsen.Spectrum(psr, freqs=freqs)
+        del psr
+        #_ = spec_psr.NcalInv
+
+        h_c_list.append(spec_psr.h_c)
+        freqs_list.append(spec_psr.freqs)
+        del spec_psr
+
+        print(f"Hasasia Spectrum Pulsar {psr_name} created\n")
+        #psr_gp = psrs_f.create_group(name = str(psr.name))
+        #psr_hasa_gp = psr_gp.create_group(name = 'psr_hasa')
+        #psr_hasa_spec_gp = psr_gp.create_group(name = 'psr_hasa_spectrum')
+        #psr_attri = dir(psr)
+        #psr_spec_attri = dir(spec_psr)
+        #for attri in psr_attri:
+            #try:
+                #sp_entry = h5format.H5Entry(name=attri,description = 'Hasasia Pulsar',
+                 #                           required=False,use_dataset=True)
+                #sp_entry.write_to_hdf5(h5file=psr_hasa_gp,thing=psr)
+                #psrs_f.flush()
+                #del sp_entry
+                #gc.collect()
+            #except:
+                #print(attri)
+                #break
+
+        #for attri in psr_spec_attri:
+            #try:
+                #sp_entry = h5format.H5Entry(name=attri,description = 'Hasasia Spectra Pulsar',
+                                            #required=False,use_dataset=True)
+                #sp_entry.write_to_hdf5(h5file=psr_hasa_spec_gp,thing=spec_psr)
+                #psrs_f.flush()
+                #del sp_entry
+                #gc.collect()
+            #except:
+                #print(attri)
+        #psrs_f.flush()
+        #print(f"Pulsar {psr.name} burned to disk\n")
         end_time = time.time()
-        time_increments.write(f"{p.name} {start_time-null_time} {end_time-null_time}\n")
-        print('\rPSR {0} complete'.format(p.name),end='',flush=True)
-    return Specs
+        time_increments.write(f"{psr_name} {start_time-null_time} {end_time-null_time}\n")
+        print('\rPSR {0} complete'.format(psr_name),end='',flush=True)
+        
+    return psrs_names, h_c_list,  freqs_list
+
 
 def yr_11_data():
     
@@ -264,28 +312,34 @@ def yr_12_data():
 ################################################################################################################
 ################################################################################################################
 if __name__ == '__main__':
+    
+    
     null_time = time.time()
     Ncal_time_file.write(f'{null_time}\n')
-    kill_count = 8
+    kill_count = 10
     thin = 1
     #code under this is profiled
     with cProfile.Profile() as pr:
+
+        #all information tied to the 11-year dataset
         psr_list, pars, tims, noise, rn_psrs = yr_11_data()
+
+        #creates enterprise pulsar
         ePsrs = pulsar_class(pars, tims)
         Tspan = hsen.get_Tspan(ePsrs)
         fyr = 1/(365.25*24*3600)
         freqs = np.logspace(np.log10(1/(5*Tspan)),np.log10(2e-7),300)
-        Psrs = array_contruction(ePsrs)
-        specs = hasasia_spectrum(Psrs)
+
+        #computes hasasia, and hasasia spectra pulsar to get characteristic strain
+        psrs_names, h_c_list,  freqs_list = array_contruction(ePsrs)
+
         with open(path + '/test_time.txt', "w") as file:
             stats = pstats.Stats(pr, stream=file)
             stats.sort_stats(pstats.SortKey.CUMULATIVE)
             stats.print_stats()
 
-        #for sp,p in zip(specs,Psrs):
-            #plt.loglog(sp.freqs,sp.h_c,lw=2,label=p.name)
-        
-
-        #plt.legend()
-        #plt.show()
-        #plt.close()
+        for i in range(len(psrs_names)):
+            plt.loglog(freqs_list[i],h_c_list[i],lw=2,label=psrs_names[i])
+        plt.legend()
+        plt.show()
+        plt.close()

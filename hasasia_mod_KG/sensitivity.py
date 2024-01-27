@@ -9,7 +9,7 @@ import scipy.stats as sps
 import scipy.linalg as sl
 import os, pickle
 from astropy import units as u
-import hasasia, psutil
+import hasasia, psutil, h5py
 
 
 
@@ -19,6 +19,9 @@ from utils import create_design_matrix
 #KG: test imports and files
 import time
 from memory_profiler import profile 
+import dask.dataframe as dd
+import dask.array as da
+import dask.bag as db
 path = r'/home/gourliek/Desktop/Profile_Data'
 get_NcalInv_mem = open(path + '/NcalInv_mem.txt','w')
 corr_from_psd_mem = open(path + '/corr_from_psd_mem.txt','w')
@@ -280,22 +283,77 @@ def get_NcalInv(psr, nf=200, fmin=None, fmax=2e-7, freqs=None,
 
     #KG: cholesky decomposition of covariance matrix method
     start_time_chol = time.time()
-    L = jsc.linalg.cholesky(psr.N)            
-    A = jnp.matmul(L,G)
-    del L
-    Ncal = jnp.matmul(A.T,A)
-    del A
-    NcalInv = jnp.linalg.inv(Ncal)
-    end_time_chol = time.time()
-    Ncal_time_file.write(f'Cholesky: ({start_time_chol},{end_time_chol})\n')
 
-    TfN = np.matmul(np.conjugate(Gtilde),np.matmul(NcalInv,Gtilde.T)) / 2
-    if return_Gtilde_Ncal:
-        return np.real(TfN), Gtilde, Ncal
-    elif full_matrix:
-        return np.real(TfN)
-    else:
-        return np.real(np.diag(TfN)) / get_Tspan([psr])
+    L = sl.cholesky(psr.N)
+ 
+    #assigning dask array chunks. This number is arbitary and dask automatically finds optimal value
+    #maybe here, implement x = x.rechunk('auto')
+    chunk = 300
+
+
+    L = da.from_array(L, chunks=(chunk, chunk))
+    G = da.from_array(G, chunks=(chunk, chunk))
+    Gtilde = da.from_array(Gtilde, chunks=(chunk, chunk))
+
+    #auto-chunking for best performance
+    #L = L.rechunk('auto')
+    #G = G.rechunk('auto')
+    #Gtilde = Gtilde.rechunk('auto')
+
+    A = da.matmul(L, G)
+    Ncal = da.matmul(A.T, A)
+
+    #if Ncal.chunks[0][0] == Ncal.chunks[0][1]:
+    #    chunk = Ncal.chunks[0][0]    #grabs first chunk shape, and first element within the shape. Since Ncal is square, the chunks are also square
+    #else:
+    #    chunk = 1000
+    
+    #opens file
+    with h5py.File(path + '/storage.hdf5', 'a') as hdf5_file:
+        #writes matrix A and Ncal to hdf5 in chunks
+        da.to_hdf5(hdf5_file.filename, {'A' : A}, chunks=(chunk,chunk))
+        da.to_hdf5(hdf5_file.filename, {'Ncal' : Ncal}, chunks=(chunk,chunk))
+
+        #creates dataset in hdf5 file for inverse to be stored at
+        NcalInv = hdf5_file.create_dataset(name='NcalInv',shape=Ncal.shape,dtype=np.float64)
+        hdf5_file.flush()
+        Ncal_p = hdf5_file['Ncal']
+        n = 0
+
+        print(f'Ncal shape: {Ncal.shape}')
+        #for-loop used to compute inverse due to inverse operation dask incompactability
+        #(1000,1000) chunk computation
+        for i in range(1000,Ncal.shape[0]+1,1000):
+           NcalInv[n:i,n:i] = np.linalg.inv(Ncal_p[n:i,n:i])
+           hdf5_file.flush()
+           n = i
+        print('inverse calculated')
+
+        NcalInv = da.from_array(NcalInv[...],chunks=(chunk, chunk))
+        TfN = da.matmul(da.conj(Gtilde),da.matmul(NcalInv,Gtilde.T)) / 2
+        da.to_hdf5(hdf5_file.filename, {'TfN' : TfN}, chunks=(chunk,chunk))
+        TfN_p = hdf5_file['TfN']
+        hdf5_file.flush()
+    
+        end_time_chol = time.time()
+        Ncal_time_file.write(f'Cholesky: ({start_time_chol},{end_time_chol})\n')
+        if return_Gtilde_Ncal:
+            TfN = TfN_p[...]
+            Ncal = Ncal_p[...]
+            Gtilde = Gtilde.compute()
+            del hdf5_file['Ncal'], hdf5_file['A'], hdf5_file['TfN'], hdf5_file['NcalInv']
+            hdf5_file.flush()
+            return np.real(TfN), Gtilde, Ncal
+        elif full_matrix:
+            TfN = TfN_p[...]
+            del hdf5_file['Ncal'], hdf5_file['A'], hdf5_file['TfN'], hdf5_file['NcalInv']
+            hdf5_file.flush()
+            return np.real(TfN)
+        else:
+            TfN = TfN_p[...]
+            del hdf5_file['Ncal'], hdf5_file['A'], hdf5_file['TfN'], hdf5_file['NcalInv']
+            hdf5_file.flush()
+            return np.real(np.diag(TfN)) / get_Tspan([psr])
 
 def resid_response(freqs):
     r"""
