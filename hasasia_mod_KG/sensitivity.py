@@ -293,6 +293,132 @@ def get_NcalInv(psr, nf=200, fmin=None, fmax=2e-7, freqs=None,
         return np.real(TfN)
     else:
         return np.real(np.diag(TfN)) / get_Tspan([psr])
+    
+
+
+
+#KG change
+def get_NcalInv_rrf(psr, nf=200, fmin=None, fmax=2e-7, freqs=None,
+                exact_yr_freqs = False, full_matrix=False,
+                return_Gtilde_Ncal=False, tm_fit=True, Gmatrix=None):
+    r"""
+    Calculate the inverse-noise-wieghted transmission function for a given
+    pulsar. This calculates
+    :math:`\mathcal{N}^{-1}(f,f') , \; \mathcal{N}^{-1}(f)`
+    in `[1]`_, see Equations (19-20).
+
+    .. _[1]: https://arxiv.org/abs/1907.04341
+
+    Parameters
+    ----------
+
+    psr : array
+        Pulsar object.
+
+    nf : int, optional
+        Number of frequencies at which to calculate transmission function.
+
+    fmin : float, optional
+        Minimum frequency at which to calculate transmission function.
+
+    fmax : float, optional
+        Maximum frequency at which to calculate transmission function.
+
+    exact_yr_freqs : bool, optional
+        Whether to use exact 1/year and 2/year frequency values in calculation.
+
+    full_matrix : bool, optional
+        Whether to return the full, two frequency NcalInv.
+
+    return_Gtilde_Ncal : bool, optional
+        Whether to return Gtilde and Ncal. Gtilde is the Fourier transform of
+        the G-matrix.
+
+    tm_fit : bool, optional
+        Whether to include the timing model fit in the calculation.
+
+    Gmatrix : ndarray, optional
+        Provide already calculated G-matrix. This can speed up calculations
+        since the singular value decomposition can take time for large matrices.
+
+    Returns
+    -------
+
+    inverse-noise-weighted transmission function
+
+    """
+    toas = psr.toas
+    # make filter
+    T = toas.max()-toas.min()
+    f0 = 1 / T
+    if freqs is None:
+        if fmin is None:
+            fmin = f0/5
+        ff = np.logspace(np.log10(fmin), np.log10(fmax), nf,dtype='float128')
+        if exact_yr_freqs:
+            ff = np.sort(np.append(ff,[fyr,2*fyr]))
+            nf +=2
+    else:
+        nf = len(freqs)
+        ff = freqs
+
+    if tm_fit:
+        if Gmatrix is None:
+            G = G_matrix(psr.designmatrix)
+        else:
+            G = Gmatrix
+    else:
+        G = np.eye(toas.size)
+
+    Gtilde = np.zeros((ff.size,G.shape[1]),dtype='complex128')
+    #N_freqs x N_TOA-N_par
+
+    # Note we do not include factors of NTOA or Timespan as they cancel
+    # with the definition of Ncal
+    Gtilde = np.dot(np.exp(1j*2*np.pi*ff[:,np.newaxis]*toas),G)
+    # N_freq x N_TOA-N_par
+
+    #Defining Fourier design matrix
+    F = np.zeros((toas.size,nf*2),dtype = np.float64)
+    for i in range(1,toas.size+1):
+        for j in range(1,nf+1):
+            F[i,2*j-1] = np.sin(2*np.pi*toas[i]*j*f0)
+            F[i,2*j] = np.cos(2*np.pi*toas[i]*j*f0)
+
+    #Defining Red noise power law phi
+    phi = add_red_noise_power()
+    phi_inv = np.linalg.inv(phi)
+
+    #calculating K_inv
+    L = sl.linalg.cholesky(psr.N)            
+    A = L @ G
+    del L
+    K = A.T @ A
+    del A
+    K_inv = np.linalg.inv(K)
+    del K
+
+    #calculating J
+    J = G.T @ F
+
+    Q = phi_inv + (J.T @ K_inv @ J)
+    Q_inv = np.linalg.inv(Q)
+    NcalInv = K_inv - (K_inv @ J @ Q_inv @ J.T @ K_inv)
+    TfN = (np.conjugate(Gtilde) @ NcalInv @ Gtilde.T) / 2    
+
+    if return_Gtilde_Ncal:
+        return np.real(TfN), Gtilde, Ncal
+    elif full_matrix:
+        return np.real(TfN)
+    else:
+        return np.real(np.diag(TfN)) / get_Tspan([psr])
+
+
+
+   
+
+
+
 
 def resid_response(freqs):
     r"""
