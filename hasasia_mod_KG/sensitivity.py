@@ -297,128 +297,6 @@ def get_NcalInv(psr, nf=200, fmin=None, fmax=2e-7, freqs=None,
 
 
 
-#KG change
-def get_NcalInv_rrf(psr, nf=200, fmin=None, fmax=2e-7, freqs=None,
-                exact_yr_freqs = False, full_matrix=False,
-                return_Gtilde_Ncal=False, tm_fit=True, Gmatrix=None):
-    r"""
-    Calculate the inverse-noise-wieghted transmission function for a given
-    pulsar. This calculates
-    :math:`\mathcal{N}^{-1}(f,f') , \; \mathcal{N}^{-1}(f)`
-    in `[1]`_, see Equations (19-20).
-
-    .. _[1]: https://arxiv.org/abs/1907.04341
-
-    Parameters
-    ----------
-
-    psr : array
-        Pulsar object.
-
-    nf : int, optional
-        Number of frequencies at which to calculate transmission function.
-
-    fmin : float, optional
-        Minimum frequency at which to calculate transmission function.
-
-    fmax : float, optional
-        Maximum frequency at which to calculate transmission function.
-
-    exact_yr_freqs : bool, optional
-        Whether to use exact 1/year and 2/year frequency values in calculation.
-
-    full_matrix : bool, optional
-        Whether to return the full, two frequency NcalInv.
-
-    return_Gtilde_Ncal : bool, optional
-        Whether to return Gtilde and Ncal. Gtilde is the Fourier transform of
-        the G-matrix.
-
-    tm_fit : bool, optional
-        Whether to include the timing model fit in the calculation.
-
-    Gmatrix : ndarray, optional
-        Provide already calculated G-matrix. This can speed up calculations
-        since the singular value decomposition can take time for large matrices.
-
-    Returns
-    -------
-
-    inverse-noise-weighted transmission function
-
-    """
-    toas = psr.toas
-    # make filter
-    T = toas.max()-toas.min()
-    f0 = 1 / T
-    if freqs is None:
-        if fmin is None:
-            fmin = f0/5
-        ff = np.logspace(np.log10(fmin), np.log10(fmax), nf,dtype='float128')
-        if exact_yr_freqs:
-            ff = np.sort(np.append(ff,[fyr,2*fyr]))
-            nf +=2
-    else:
-        nf = len(freqs)
-        ff = freqs
-
-    if tm_fit:
-        if Gmatrix is None:
-            G = G_matrix(psr.designmatrix)
-        else:
-            G = Gmatrix
-    else:
-        G = np.eye(toas.size)
-
-    Gtilde = np.zeros((ff.size,G.shape[1]),dtype='complex128')
-    #N_freqs x N_TOA-N_par
-
-    # Note we do not include factors of NTOA or Timespan as they cancel
-    # with the definition of Ncal
-    Gtilde = np.dot(np.exp(1j*2*np.pi*ff[:,np.newaxis]*toas),G)
-    # N_freq x N_TOA-N_par
-
-    #Defining Fourier design matrix
-    F = np.zeros((toas.size,nf*2),dtype = np.float64)
-    for i in range(1,toas.size+1):
-        for j in range(1,nf+1):
-            F[i,2*j-1] = np.sin(2*np.pi*toas[i]*j*f0)
-            F[i,2*j] = np.cos(2*np.pi*toas[i]*j*f0)
-
-    #Defining Red noise power law phi
-    phi = add_red_noise_power()
-    phi_inv = np.linalg.inv(phi)
-
-    #calculating K_inv
-    L = sl.linalg.cholesky(psr.N)            
-    A = L @ G
-    del L
-    K = A.T @ A
-    del A
-    K_inv = np.linalg.inv(K)
-    del K
-
-    #calculating J
-    J = G.T @ F
-
-    Q = phi_inv + (J.T @ K_inv @ J)
-    Q_inv = np.linalg.inv(Q)
-    NcalInv = K_inv - (K_inv @ J @ Q_inv @ J.T @ K_inv)
-    TfN = (np.conjugate(Gtilde) @ NcalInv @ Gtilde.T) / 2    
-
-    if return_Gtilde_Ncal:
-        return np.real(TfN), Gtilde, Ncal
-    elif full_matrix:
-        return np.real(TfN)
-    else:
-        return np.real(np.diag(TfN)) / get_Tspan([psr])
-
-
-
-   
-
-
-
 
 def resid_response(freqs):
     r"""
@@ -488,6 +366,296 @@ class Pulsar(object):
         if not hasattr(self, '_G'):
             self._G = G_matrix(designmatrix=self.designmatrix)
         return self._G
+
+
+
+
+
+
+#KG rref changes
+class rref_Pulsar(object):
+
+    def __init__(self, toas, toaerrs, A, Gamma, phi=None, theta=None,
+                 designmatrix=None, N=None, pdist=1.0*u.kpc):
+        self.toas = toas
+        self.toaerrs = toaerrs
+        self.A = A
+        self.Gamma = Gamma
+        self.phi = phi
+        self.theta = theta
+        self.pdist = make_quant(pdist,'kpc')
+
+        if N is None:
+            self.N = np.diag(toaerrs**2) #N ==> weights
+        else:
+            self.N = N
+
+        if designmatrix is None:
+            self.designmatrix = create_design_matrix(toas, RADEC=True,
+                                                     PROPER=True, PX=True)
+        else:
+            self.designmatrix = designmatrix
+
+    @property
+    def G(self):
+        """Inverse Noise Weighted Transmission Function."""
+        if not hasattr(self, '_G'):
+            self._G = G_matrix(designmatrix=self.designmatrix)
+        return self._G
+
+
+
+
+
+
+
+#KG rref changes
+class rref_Spectrum(object):
+    def __init__(self, psr, nf=400, fmin=None, fmax=2e-7,
+                 freqs=None, tm_fit=True, **Tf_kwargs):
+        self._H_0 = 72 * u.km / u.s / u.Mpc
+        self.toas = psr.toas
+        self.toaerrs = psr.toaerrs
+        self.A = psr.A
+        self.Gamma = psr.Gamma
+        self.phi = psr.phi
+        self.theta = psr.theta
+        self.N = psr.N
+        self.G = psr.G
+        self.designmatrix = psr.designmatrix
+        self.pdist = psr.pdist
+        self.tm_fit = tm_fit
+        self.Tf_kwargs = Tf_kwargs
+        if freqs is None:
+            f0 = 1 / get_Tspan([psr])
+            if fmin is None:
+                fmin = f0/5
+            self.freqs = np.logspace(np.log10(fmin), np.log10(fmax), nf)
+        else:
+            self.freqs = freqs
+
+        self._psd_prefit = np.zeros_like(self.freqs)
+
+    @property
+    def psd_postfit(self):
+        """Postfit Residual Power Spectral Density"""
+        if not hasattr(self, '_psd_postfit'):
+            self._psd_postfit = self.psd_prefit * self.NcalInv
+        return self._psd_postfit
+
+    @property
+    def psd_prefit(self):
+        """Prefit Residual Power Spectral Density"""
+        if np.all(self._psd_prefit==0):
+            raise ValueError('Must set Prefit Residual Power Spectral Density.')
+            # print('No Prefit Residual Power Spectral Density set.\n'
+            #       'Setting psd_prefit to harmonic mean of toaerrs.')
+            # sigma = sps.hmean(self.toaerrs)
+            # dt = 14*24*3600 # 2 Week Cadence
+            # self.add_white_noise_pow(sigma=sigma,dt=dt)
+
+        return self._psd_prefit
+
+    @property
+    def Tf(self):
+        if not hasattr(self, '_Tf'):
+            self._Tf,_,_ = get_Tf(designmatrix=self.designmatrix,
+                                  toas=self.toas, N=self.N,
+                                  freqs=self.freqs, from_G=True, Gmatrix=self.G,
+                                  **self.Tf_kwargs)
+        return self._Tf
+
+
+    @property
+    def get_NcalInv(self):
+        Gmatrix = None
+        tm_fit = self.tm_fit
+        toas = self.toas
+        freqs = self.freqs
+        # make filter
+        T = toas.max()-toas.min()
+        f0 = 1 / T
+        
+        
+        nf = len(freqs)
+        ff = freqs
+        if tm_fit:
+            if Gmatrix is None:
+                G = G_matrix(self.designmatrix)
+            else:
+                G = Gmatrix
+        else:
+            G = np.eye(toas.size)
+
+
+
+        Gtilde = np.zeros((ff.size,G.shape[1]),dtype='complex128')
+        #N_freqs x N_TOA-N_par
+
+        # Note we do not include factors of NTOA or Timespan as they cancel
+        # with the definition of Ncal
+        Gtilde = np.dot(np.exp(1j*2*np.pi*ff[:,np.newaxis]*toas),G)
+        # N_freq x N_TOA-N_par
+
+        #Defining Fourier design matrix
+        F = np.zeros((toas.size,nf*2),dtype = np.float64)
+        for i in range(toas.size):
+            for j in range(nf):
+                F[i,2*j] = np.sin(2*np.pi*toas[i]*j*f0)
+                F[i,2*j+1] = np.cos(2*np.pi*toas[i]*j*f0)
+
+
+
+
+
+        rn_corr_inv = np.identity(2*ff.size)
+        for i in range(rn_corr_inv.shape[0]):
+            f_j = f0*i
+            rn_corr_inv[i,i] = ((self.A**2)/(12*np.pi**2) * f0 * (f_j/fyr)**self.Gamma)**(-1)
+
+        
+        #calculating K_inv
+        L = sl.cholesky(self.N)            
+        A = L @ G
+        del L
+        K = A.T @ A
+        del A
+        K_inv = np.linalg.inv(K)
+        del K
+
+        #calculating J
+        J = G.T @ F
+
+        Q = rn_corr_inv + (J.T @ K_inv @ J)
+        del rn_corr_inv
+        Q_inv = np.linalg.inv(Q)
+        del Q
+        NcalInv = K_inv - (K_inv @ J @ Q_inv @ J.T @ K_inv)
+        #possibly delete more stuff here
+        TfN = (np.conjugate(Gtilde) @ NcalInv @ Gtilde.T) / 2 
+
+        self.NcalInv = np.real(np.diag(TfN)) / get_Tspan([self])
+        return self.NcalInv
+            
+
+
+            
+
+    @property
+    def P_n(self):
+        """Inverse Noise Weighted Transmission Function."""
+        if not hasattr(self, '_P_n'):
+            self._P_n = np.power(self.get_NcalInv(), -1)
+        return self._P_n
+
+    @property
+    def S_I(self):
+        r"""Strain power sensitivity for this pulsar. Equation (74) in `[1]`_
+
+        .. math::
+            S_I=\frac{1}{\mathcal{N}^{-1}\;\mathcal{R}}
+
+        .. _[1]: https://arxiv.org/abs/1907.04341
+        """
+        if not hasattr(self, '_S_I'):
+            self._S_I = 1/resid_response(self.freqs)/self.get_NcalInv
+        return self._S_I
+
+    @property
+    def S_R(self):
+        r"""Residual power sensitivity for this pulsar.
+
+        .. math::
+            S_R=\frac{1}{\mathcal{N}^{-1}}
+
+        """
+        if not hasattr(self, '_S_R'):
+            self._S_R = 1/self.get_NcalInv()
+        return self._S_R
+
+    @property
+    def h_c(self):
+        r"""Characteristic strain sensitivity for this pulsar.
+
+        .. math::
+            h_c=\sqrt{f\;S_I}
+        """
+        if not hasattr(self, '_h_c'):
+            self._h_c = np.sqrt(self.freqs * self.S_I)
+        return self._h_c
+
+    @property
+    def Omega_gw(self):
+        r"""Energy Density sensitivity.
+
+        .. math::
+            \Omega_{gw}=\frac{2\pi^2}{3\;H_0^2}f^3\;S_I
+        """
+        self._Omega_gw = ((2*np.pi**2/3) * self.freqs**3 * self.S_I
+                           / self._H_0.to('Hz').value**2)
+        return self._Omega_gw
+
+    def add_white_noise_power(self, sigma=None, dt=None, vals=False):
+        r"""
+        Add power law red noise to the prefit residual power spectral density.
+
+        **Note:** All noise information is furnished by the covariance matrix in
+        the `hasasia.Pulsar` object, this is simply useful for bookkeeping and
+        plots.
+
+        Parameters
+        ----------
+        sigma : float
+            TOA error.
+
+        dt : float
+            Time between observing epochs in [seconds].
+
+        vals : bool
+            Whether to return the psd values as an array. Otherwise just added
+            to `self.psd_prefit`.
+        """
+        white_noise = 2.0 * dt * (sigma)**2 * np.ones_like(self.freqs)
+        self._psd_prefit += white_noise
+        if vals:
+            return white_noise
+
+    def add_red_noise_power(self, A=None, gamma=None, vals=False):
+        r"""
+        Add power law red noise to the prefit residual power spectral density.
+        As :math:`P=A^2(f/fyr)^{-\gamma}`.
+
+        **Note:** All noise information is furnished by the covariance matrix in
+        the `hasasia.Pulsar` object, this is simply useful for bookkeeping and
+        plots.
+
+        Parameters
+        ----------
+        A : float
+            Amplitude of red noise.
+
+        gamma : float
+            Spectral index of red noise powerlaw.
+
+        vals : bool
+            Whether to return the psd values as an array. Otherwise just added
+            to `self.psd_prefit`.
+        """
+        ff = self.freqs
+        red_noise = A**2*(ff/fyr)**(-gamma)/(12*np.pi**2) * yr_sec**3
+        self._psd_prefit += red_noise
+        if vals:
+            return red_noise
+
+    def add_noise_power(self,noise):
+        r"""Add any spectrum of noise. Must match length of frequency array.
+
+        **Note:** All noise information is furnished by the covariance matrix in
+        the `hasasia.Pulsar` object, this is simply useful for bookkeeping and
+        plots.
+        """
+        self._psd_prefit += noise
+
 
 class Spectrum(object):
     """Class to encode the spectral information for a single pulsar.
