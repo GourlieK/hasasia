@@ -501,38 +501,38 @@ class rref_Spectrum(object):
         F = np.zeros((toas.size,nf*2),dtype = np.float64)
         for i in range(toas.size):
             for j in range(nf):
-                F[i,2*j] = np.sin(2*np.pi*toas[i]*j*f0)
-                F[i,2*j+1] = np.cos(2*np.pi*toas[i]*j*f0)
+                F[i,2*j] = np.sin(2*np.pi*toas[i]*(j+1)*f0)
+                F[i,2*j+1] = np.cos(2*np.pi*toas[i]*(j+1)*f0)
 
 
 
 
 
-        rn_corr_inv = np.identity(2*ff.size)
-        for i in range(rn_corr_inv.shape[0]):
-            f_j = f0*i
-            rn_corr_inv[i,i] = ((self.A**2)/(12*np.pi**2) * f0 * (f_j/fyr)**self.Gamma)**(-1)
+        rn_corr_inv = np.identity(2*nf)        
+        for i in range(nf):
+            f_j = f0*(i+1)*ff[i]
+            rn_corr_inv[2*i,2*i] = (self.A**2*(f_j/fyr)**(-self.Gamma)/(12*np.pi**2) * yr_sec**3) ** (-1)
+            rn_corr_inv[2*i+1,2*i+1] = (self.A**2*(f_j/fyr)**(-self.Gamma)/(12*np.pi**2) * yr_sec**3) ** (-1)
+    
 
-        
         #calculating K_inv
         L = sl.cholesky(self.N)            
-        A = L @ G
+        A = jnp.matmul(L,G)
         del L
-        K = A.T @ A
+        K = jnp.matmul(A.T,A)
         del A
         K_inv = np.linalg.inv(K)
         del K
-
+    
         #calculating J
-        J = G.T @ F
-
-        Q = rn_corr_inv + (J.T @ K_inv @ J)
+        J = jnp.matmul(G.T,F)
+        Q = rn_corr_inv + jnp.matmul(J.T,jnp.matmul(K_inv,J))
         del rn_corr_inv
         Q_inv = np.linalg.inv(Q)
         del Q
-        NcalInv = K_inv - (K_inv @ J @ Q_inv @ J.T @ K_inv)
+        NcalInv = K_inv - (jnp.matmul(K_inv,jnp.matmul(J,jnp.matmul(Q_inv, jnp.matmul(J.T,K_inv)))))
         #possibly delete more stuff here
-        TfN = (np.conjugate(Gtilde) @ NcalInv @ Gtilde.T) / 2 
+        TfN = (jnp.matmul(np.conjugate(Gtilde),jnp.matmul(NcalInv,Gtilde.T))) / 2 
 
         self.NcalInv = np.real(np.diag(TfN)) / get_Tspan([self])
         return self.NcalInv
