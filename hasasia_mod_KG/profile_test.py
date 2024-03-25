@@ -132,10 +132,6 @@ def rref_array_construction(epsrs):
         corr_from_psd_mem.write(f'Pulsar: {ePsr.name}\n')
         start_time = time.time()
       
-        corr = make_corr(ePsr)[::thin,::thin]
-
-        #building red noise powerlaw using standard amplitude and gamma
-        plaw = hsen.red_noise_powerlaw(A=9e-16, gamma=13/3., freqs=freqs)
             
         #if red noise parameters for an individual pulsar is present, add it to standard red noise
         if ePsr.name in rn_psrs.keys():
@@ -144,15 +140,10 @@ def rref_array_construction(epsrs):
          
             #create white noise covariance matrix from enterprise pulsar 
             wn_corr = make_corr(ePsr)[::thin,::thin]
-            #plaw += hsen.red_noise_powerlaw(A=Amp, gamma=gam, freqs=freqs)
-
-        #adding red noise components to the noise covariance matrix via power spectral density
-            #corr = wn_corr + hsen.corr_from_psd(freqs=freqs, psd=plaw,
-                                    # toas=ePsr.toas[::thin])   
+            
             #creating hasasia pulsar tobject 
-            psr = hsen.rref_Pulsar(toas=ePsr.toas[::thin],
+            psr = hsen.Pulsar(toas=ePsr.toas[::thin],
                                 toaerrs=ePsr.toaerrs[::thin],
-                                A = Amp, Gamma = gam,
                                 phi=ePsr.phi,theta=ePsr.theta, 
                                 N=wn_corr, designmatrix=ePsr.Mmat[::thin,:])
             
@@ -167,7 +158,7 @@ def rref_array_construction(epsrs):
             psrs_names.append(psr.name)
 
             #creates spectrum hasasia pulsar to calculate characteristic straing
-            spec_psr = hsen.rref_Spectrum(psr, freqs=freqs)
+            spec_psr = hsen.RREF_Spectrum(psr, amp = Amp, gamma = gam, freqs=freqs)
 
             #hasasia pulsar no longer needed
             del psr
@@ -210,12 +201,12 @@ def array_construction(epsrs):
         corr = make_corr(ePsr)[::thin,::thin]
 
         #building red noise powerlaw using standard amplitude and gamma
-        #plaw = hsen.red_noise_powerlaw(A=9e-16, gamma=13/3., freqs=freqs)
+        plaw = hsen.red_noise_powerlaw(A=9e-16, gamma=13/3., freqs=freqs)
 
         #if red noise parameters for an individual pulsar is present, add it to standard red noise
         if ePsr.name in rn_psrs.keys():
             Amp, gam = rn_psrs[ePsr.name]
-            plaw = hsen.red_noise_powerlaw(A=Amp, gamma=gam, freqs=freqs)
+            plaw += hsen.red_noise_powerlaw(A=Amp, gamma=gam, freqs=freqs)
 
         #adding red noise components to the noise covariance matrix via power spectral density
         corr += hsen.corr_from_psd(freqs=freqs, psd=plaw,
@@ -242,7 +233,6 @@ def array_construction(epsrs):
 
         #hasasia pulsar no longer needed
         del psr
-        #_ = spec_psr.NcalInv
 
         h_c_list.append(spec_psr.h_c)
         freqs_list.append(spec_psr.freqs)
@@ -413,7 +403,7 @@ if __name__ == '__main__':
 
     null_time = time.time()
     Ncal_time_file.write(f'{null_time}\n')
-    kill_count = 34
+    kill_count = 5
     thin = 10
     #code under this is profiled
     with cProfile.Profile() as pr:
@@ -425,11 +415,11 @@ if __name__ == '__main__':
         ePsrs = pulsar_class(pars, tims)
         Tspan = hsen.get_Tspan(ePsrs)
         fyr = 1/(365.25*24*3600)
-        freqs = np.logspace(np.log10(1/(5*Tspan)),np.log10(2e-7),300)
+        freqs = np.logspace(np.log10(1/(5*Tspan)),np.log10(2e-7),200)
 
         #computes hasasia, and hasasia spectra pulsar to get characteristic strain
         psrs_names_r, h_c_list_r,  freqs_list_r = rref_array_construction(ePsrs)
-        #psrs_names, h_c_list,  freqs_list = array_construction(ePsrs)
+        psrs_names, h_c_list,  freqs_list = array_construction(ePsrs)
 
         with open(path + '/test_time.txt', "w") as file:
             stats = pstats.Stats(pr, stream=file)
@@ -439,8 +429,8 @@ if __name__ == '__main__':
         for i in range(len(psrs_names_r)):
             plt.loglog(freqs_list_r[i],h_c_list_r[i],lw=2,label=psrs_names_r[i])
 
-        #for i in range(len(psrs_names)):
-            #plt.loglog(freqs_list[i],h_c_list[i],lw=2,label=psrs_names[i])
+        for i in range(len(psrs_names)):
+            plt.loglog(freqs_list[i],h_c_list[i],lw=2,label=psrs_names[i])
 
         plt.legend()
         plt.show()
