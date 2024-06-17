@@ -9,6 +9,7 @@ import scipy.stats as sps
 import scipy.linalg as sl
 import os, pickle
 from astropy import units as u
+from enterprise.signals.gp_bases import createfourierdesignmatrix_red
 
 import hasasia
 
@@ -22,6 +23,9 @@ import time
 from memory_profiler import profile 
 path = r'/home/gourliek/Desktop/Profile_Data'
 get_NcalInv_mem = open(path + '/NcalInv_mem.txt','w')
+get_NcalInvRFF_mem = open(path + '/NcalInvRRF_mem.txt','w')
+get_K_inv_mem = open(path + '/get_K_inv_mem.txt','w')
+get_J_mem = open(path + '\get_J_mem.txt','w')
 corr_from_psd_mem = open(path + '/corr_from_psd_mem.txt','w')
 Ncal_time_file = open(path + '/Ncal_meth_time.txt','a')
 
@@ -199,26 +203,27 @@ def get_Tf(designmatrix, toas, N=None, nf=200, fmin=None, fmax=2e-7,
 
 
 
-
+@profile(stream=get_J_mem)
 def get_J(psr):
     """
     psr: hasasia spectrum pulsar
     """
-    
-    
     T = psr.toas.max()-psr.toas.min()
     nf = len(psr.freqs)
-    ntoas = len(psr.toas)
-    f0 = 1 / T
+    #ntoas = len(psr.toas)
+    #f0 = 1 / T
 
-    fourier_design = np.zeros((ntoas,nf*2),dtype = np.float64)
+    F, f = createfourierdesignmatrix_red(toas=psr.toas,nmodes=nf, Tspan=T)
+    #print(F)
 
-    for i in range(ntoas):
-        for j in range(nf):
-            fourier_design[i,2*j] = np.sin(2*np.pi*psr.toas[i]*(j+1)*f0)
-            fourier_design[i,2*j+1] = np.cos(2*np.pi*psr.toas[i]*(j+1)*f0)
+    #fourier_design = np.zeros((ntoas,nf*2),dtype = np.float64)
 
-    J = psr.G.T @ fourier_design
+    #for i in range(ntoas):
+    #    for j in range(nf):
+    #        fourier_design[i,2*j] = np.sin(2*np.pi*psr.toas[i]*(j+1)*f0)
+    #        fourier_design[i,2*j+1] = np.cos(2*np.pi*psr.toas[i]*(j+1)*f0)
+
+    J = psr.G.T @ F
     return J
 
 
@@ -227,7 +232,7 @@ def get_J(psr):
 
 
 
-
+@profile(stream=get_NcalInv_mem)
 def get_NcalInv(psr, nf=200, fmin=None, fmax=2e-7, freqs=None,
                 exact_yr_freqs = False, full_matrix=False,
                 return_Gtilde_Ncal=False, tm_fit=True, Gmatrix=None):
@@ -317,7 +322,6 @@ def get_NcalInv(psr, nf=200, fmin=None, fmax=2e-7, freqs=None,
 
     TfN = jnp.matmul(np.conjugate(Gtilde),jnp.matmul(NcalInv,Gtilde.T)) / 2
 
-    TfN = jnp.matmul(np.conjugate(Gtilde),np.matmul(NcalInv,Gtilde.T)) / 2
     if return_Gtilde_Ncal:
         return np.real(TfN), Gtilde, Ncal
     elif full_matrix:
@@ -395,7 +399,8 @@ class Pulsar(object):
         return self._G
     
     @property
-    def K_inv(self):
+    @profile(stream = get_K_inv_mem)
+    def K(self):
         """
         K_inv is used later in RREF NcalInv calculation.
         :math: (G^{T} C_{WN} G)^{-1}
@@ -403,16 +408,16 @@ class Pulsar(object):
         L = sl.cholesky(self.N)           
         A = jnp.matmul(L,self.G)
         del L
-        K = jnp.matmul(A.T,A)
+        self._K = jnp.matmul(A.T,A)
         del A
-        self._K_inv = np.linalg.inv(K)
-        del K
-        return self._K_inv
+        return self._K
+        #self._K_inv = np.linalg.inv(K)
+        #del K
+        #return self._K_inv
 
 
-
-#KG rref changes
-class RREF_Spectrum(object):
+#KG rrf changes
+class RRF_Spectrum(object):
     """Class to encode the spectral information for a single pulsar for use in Rank Reduced Formalism.
 
     Parameters
@@ -450,11 +455,14 @@ class RREF_Spectrum(object):
         self.toaerrs = psr.toaerrs
         self.amp = amp
         self.gamma = gamma
-        self.K_inv = psr.K_inv
+        
         self.phi = psr.phi
         self.theta = psr.theta
+
         self.N = psr.N
         self.G = psr.G
+        self.K = psr.K
+
         self.designmatrix = psr.designmatrix
         self.pdist = psr.pdist
         self.tm_fit = tm_fit
@@ -468,6 +476,12 @@ class RREF_Spectrum(object):
             self.freqs = freqs
 
         self._psd_prefit = np.zeros_like(self.freqs)
+
+    @property
+    def J(self):
+        if not hasattr(self, '_J'):
+            self._J = get_J(self)
+        return self._J
 
     @property
     def psd_postfit(self):
@@ -498,18 +512,50 @@ class RREF_Spectrum(object):
                                   **self.Tf_kwargs)
         return self._Tf
     
-    @property
-    def J(self):
-        if not hasattr(self, '_J'):
-            self._J = get_J(self)
-        return self._J
+    #@property
+    #@profile(stream=get_NcalInvRFF_mem)
+    #def NcalInv_v2(self):
+        # make filter
+     #   T = self.toas.max()-self.toas.min()
+      #  f0 = 1 / T
+       # nf = len(self.freqs)
+
+      #  Gtilde = np.zeros((self.freqs.size,self.G.shape[1]),dtype='complex128')
+        #N_freqs x N_TOA-N_par
+
+        # Note we do not include factors of NTOA or Timespan as they cancel
+        # with the definition of Ncal
+      #  Gtilde = np.dot(np.exp(1j*2*np.pi*self.freqs[:,np.newaxis]*self.toas),self.G)
+        # N_freq x N_TOA-N_par
+
+       # C_rn_inv = np.identity(2*nf)        
+        #for i in range(nf):
+         #   f_j = f0*(i+1)*self.freqs[i]
+          #  C_rn_inv[2*i,2*i] = (self.amp**2*(f_j/fyr)**(-self.gamma)/(12*np.pi**2) * yr_sec**3) ** (-1)
+           # C_rn_inv[2*i+1,2*i+1] = (self.amp**2*(f_j/fyr)**(-self.gamma)/(12*np.pi**2) * yr_sec**3) ** (-1)
+    
+        #print('1')
+        #Q = C_rn_inv + jnp.matmul(self.J.T,jnp.matmul(self.K_inv,self.J))
+        #del C_rn_inv
+        #rint('2')
+        #Q_inv = np.linalg.inv(Q)
+        #del Q
+        #print('3')
+        #_NcalInv = self.K_inv - (jnp.matmul(self.K_inv,jnp.matmul(self.J,jnp.matmul(Q_inv, jnp.matmul(self.J.T,self.K_inv)))))
+        #print('4')
+        #TfN = (jnp.matmul(np.conjugate(Gtilde),jnp.matmul(_NcalInv,Gtilde.T))) / 2 
+        #print('5')
+        #del Gtilde, _NcalInv
+        #return np.real(np.diag(TfN)) / get_Tspan([self])
+    
 
     @property
-    def NcalInv(self):
+    def NcalInv(self, full_matrix=False, return_Gtilde_Ncal=False):
         # make filter
         T = self.toas.max()-self.toas.min()
         f0 = 1 / T
         nf = len(self.freqs)
+        ntoas = len(self.toas)
 
         Gtilde = np.zeros((self.freqs.size,self.G.shape[1]),dtype='complex128')
         #N_freqs x N_TOA-N_par
@@ -519,22 +565,41 @@ class RREF_Spectrum(object):
         Gtilde = np.dot(np.exp(1j*2*np.pi*self.freqs[:,np.newaxis]*self.toas),self.G)
         # N_freq x N_TOA-N_par
 
-        C_rn_inv = np.identity(2*nf)        
+        C_rn_proto= self.add_red_noise_power(A=self.amp, gamma=self.gamma, vals=True) #1D array
+        C_rn = np.zeros(shape=(2*nf,2*nf))        
         for i in range(nf):
-            f_j = f0*(i+1)*self.freqs[i]
-            C_rn_inv[2*i,2*i] = (self.amp**2*(f_j/fyr)**(-self.gamma)/(12*np.pi**2) * yr_sec**3) ** (-1)
-            C_rn_inv[2*i+1,2*i+1] = (self.amp**2*(f_j/fyr)**(-self.gamma)/(12*np.pi**2) * yr_sec**3) ** (-1)
-    
+            C_rn[2*i,2*i] = C_rn_proto[i]
+            C_rn[2*i+1,2*i+1] = C_rn_proto[i]
 
-        Q = C_rn_inv + jnp.matmul(self.J.T,jnp.matmul(self.K_inv,self.J))
-        del C_rn_inv
-        Q_inv = np.linalg.inv(Q)
-        del Q
-        self._NcalInv = self.K_inv - (jnp.matmul(self.K_inv,jnp.matmul(self.J,jnp.matmul(Q_inv, jnp.matmul(self.J.T,self.K_inv)))))
+       
+
+        Ncal = self.K + self.J @ C_rn @ self.J.T
+        NcalInv = np.linalg.inv(Ncal)
+
+        TfN = jnp.matmul(np.conjugate(Gtilde),jnp.matmul(NcalInv,Gtilde.T)) / 2
+
+        if return_Gtilde_Ncal:
+            return np.real(TfN), Gtilde, Ncal
+        elif full_matrix:
+            return np.real(TfN)
+        else:
+            return np.real(np.diag(TfN)) / get_Tspan([self])
         
-        TfN = (jnp.matmul(np.conjugate(Gtilde),jnp.matmul(self._NcalInv,Gtilde.T))) / 2 
+    
+        #D = self.N + (F @ C_rn @ F.T)
+        #del F, C_rn
+        #do trick here
+        #Ncal = self.G.T @ D @ self.G
+        #_NcalInv = np.linalg.inv(Ncal)
+        #TfN = (jnp.matmul(np.conjugate(Gtilde),jnp.matmul(_NcalInv,Gtilde.T))) / 2 
+        #del Gtilde, _NcalInv
+        #return np.real(np.diag(TfN)) / get_Tspan([self])
 
-        return np.real(np.diag(TfN)) / get_Tspan([self])
+
+
+
+
+
             
 
 

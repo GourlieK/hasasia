@@ -26,7 +26,7 @@ except FileExistsError:
     os.mkdir(path)
 corr_matrix_mem = open(path + '/corr_matrix_mem.txt','w')
 sens_mem = open(path + '/sens_mem.txt','w')
-h_spectra_mem = open(path + '/h_spectra_mem.txt','w')
+sens_mem_RRF= open(path + '/sens_mem_RRF.txt','w')
 time_increments = open(path + '/psr_increm.txt','w')
 Ncal_time_file = open(path + '/Ncal_meth_time.txt','w')
 
@@ -115,12 +115,13 @@ def make_corr(psr):
     return corr
 
 
-
-def rref_array_construction(epsrs):
+@profile(stream=sens_mem_RRF)
+def rrf_array_construction(epsrs):
      #lists used for characteristic strain plots
     psrs_names = []
     h_c_list = []
     freqs_list = []
+    NcalInv_rrf_list = []
     
 
     #iterates through each enterprise pulsar
@@ -158,7 +159,7 @@ def rref_array_construction(epsrs):
             psrs_names.append(psr.name)
 
             #creates spectrum hasasia pulsar to calculate characteristic straing
-            spec_psr = hsen.RREF_Spectrum(psr, amp = Amp, gamma = gam, freqs=freqs)
+            spec_psr = hsen.RRF_Spectrum(psr, amp = Amp, gamma = gam, freqs=freqs)
 
             #hasasia pulsar no longer needed
             del psr
@@ -166,16 +167,17 @@ def rref_array_construction(epsrs):
 
             h_c_list.append(spec_psr.h_c)
             freqs_list.append(spec_psr.freqs)
+            NcalInv_rrf_list.append(spec_psr.NcalInv)
             del spec_psr
 
             print(f"Hasasia Spectrum Pulsar {psr_name} created\n")
 
             #benchmark stuff
             end_time = time.time()
-            time_increments.write(f"{psr_name} {start_time-null_time} {end_time-null_time}\n")
+            time_increments.write(f" RRF{psr_name} {start_time-null_time} {end_time-null_time}\n")
             print('\rPSR {0} complete'.format(psr_name),end='',flush=True)
     
-    return psrs_names, h_c_list,  freqs_list
+    return psrs_names, h_c_list,  freqs_list, NcalInv_rrf_list
 
 
 
@@ -186,6 +188,7 @@ def array_construction(epsrs):
     psrs_names = []
     h_c_list = []
     freqs_list = []
+    NcalInv_list = []
     
 
     #iterates through each enterprise pulsar
@@ -234,6 +237,7 @@ def array_construction(epsrs):
         #hasasia pulsar no longer needed
         del psr
 
+        NcalInv_list.append(spec_psr.NcalInv)
         h_c_list.append(spec_psr.h_c)
         freqs_list.append(spec_psr.freqs)
         del spec_psr
@@ -245,7 +249,7 @@ def array_construction(epsrs):
         time_increments.write(f"{psr_name} {start_time-null_time} {end_time-null_time}\n")
         print('\rPSR {0} complete'.format(psr_name),end='',flush=True)
         
-    return psrs_names, h_c_list,  freqs_list
+    return psrs_names, h_c_list,  freqs_list, NcalInv_list
 
 
 
@@ -403,12 +407,12 @@ if __name__ == '__main__':
 
     null_time = time.time()
     Ncal_time_file.write(f'{null_time}\n')
-    kill_count = 5
+    kill_count = 1
     thin = 10
     #code under this is profiled
+    
     with cProfile.Profile() as pr:
-
-        #all information tied to the 11-year dataset
+    #all information tied to the 11-year dataset
         psr_list, pars, tims, noise, rn_psrs = yr_11_data()
 
         #creates enterprise pulsar
@@ -418,8 +422,20 @@ if __name__ == '__main__':
         freqs = np.logspace(np.log10(1/(5*Tspan)),np.log10(2e-7),200)
 
         #computes hasasia, and hasasia spectra pulsar to get characteristic strain
-        psrs_names_r, h_c_list_r,  freqs_list_r = rref_array_construction(ePsrs)
-        psrs_names, h_c_list,  freqs_list = array_construction(ePsrs)
+        
+        psrs_names_r, h_c_list_r,  freqs_list_r, NcalInv_r = rrf_array_construction(ePsrs)
+        psrs_names, h_c_list,  freqs_list, NcalInv = array_construction(ePsrs)
+      
+     
+        for i in range(len(psrs_names)):
+           for j in range(len(NcalInv[i])):
+                diff = (NcalInv_r[i]/NcalInv[i])
+                print(diff)
+        
+
+
+
+        #print(NcalInv_r[0]-NcalInv[0])
 
         with open(path + '/test_time.txt', "w") as file:
             stats = pstats.Stats(pr, stream=file)
@@ -428,10 +444,21 @@ if __name__ == '__main__':
 
         for i in range(len(psrs_names_r)):
             plt.loglog(freqs_list_r[i],h_c_list_r[i],lw=2,label=psrs_names_r[i])
-
-        for i in range(len(psrs_names)):
             plt.loglog(freqs_list[i],h_c_list[i],lw=2,label=psrs_names[i])
-
-        plt.legend()
+        plt.rc('text', usetex=True)
+        plt.xlabel('Frequency [Hz]')
+        plt.ylabel('Characteristic Strain, $h_c$')
+        plt.legend(loc='upper left')
         plt.show()
+        plt.savefig(path+'/h_c_RRF.png')
         plt.close()
+
+        #for i in range(len(psrs_names)):
+        #    plt.loglog(freqs_list[i],h_c_list[i],lw=2,label=psrs_names[i])
+        #plt.rc('text', usetex=True)
+        #plt.xlabel('Frequency [Hz]')
+        #plt.ylabel('Characteristic Strain, $h_c$')
+        #plt.legend(loc='upper left')
+        #plt.show()
+        #plt.savefig(path+'/h_c.png')
+        #plt.close()
