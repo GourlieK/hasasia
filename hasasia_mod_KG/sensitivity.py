@@ -555,35 +555,54 @@ class RRF_Spectrum(object):
         T = self.toas.max()-self.toas.min()
         f0 = 1 / T
         nf = len(self.freqs)
-        ntoas = len(self.toas)
 
-        Gtilde = np.zeros((self.freqs.size,self.G.shape[1]),dtype='complex128')
+        
+
+        C_rn_proto = self.add_red_noise_power(A=self.amp, gamma=self.gamma, vals=True)  #
+        C_rn = np.zeros((2 * nf, 2 * nf))
+        C_rn[::2, ::2] = np.diag(C_rn_proto)
+        C_rn[1::2, 1::2] = np.diag(C_rn_proto)
+
+
+        F, _ = createfourierdesignmatrix_red(toas=self.toas,nmodes=nf, Tspan=T)
+
+        #from https://pure.mpg.de/rest/items/item_1909805/component/file_1909804/content
+        U, S, V_T = np.linalg.svd(self.G, full_matrices=False)
+        S_inv = np.diag(1 / S)
+        G_inv = jnp.matmul(V_T.T, jnp.matmul(S_inv, U.T))
+
+        v1 = jnp.matmul(G_inv,F)
+        sigma = jnp.matmul(v1.T, jnp.matmul(self.K, v1)) + np.linalg.inv(C_rn)
+        t1 = self.K - jnp.matmul(self.K.T, jnp.matmul(v1,jnp.matmul(np.linalg.inv(sigma),jnp.matmul(v1.T,self.K))))
+
+        Gtilde = np.zeros((self.freqs.size,G_inv.shape[1]),dtype='complex128')
         #N_freqs x N_TOA-N_par
 
         # Note we do not include factors of NTOA or Timespan as they cancel
         # with the definition of Ncal
-        Gtilde = np.dot(np.exp(1j*2*np.pi*self.freqs[:,np.newaxis]*self.toas),self.G)
+        Gtilde = jnp.dot(np.exp(1j*2*np.pi*self.freqs[:,np.newaxis]*self.toas),G_inv.T)  #did transpose for some reason idk???
         # N_freq x N_TOA-N_par
 
-        C_rn_proto= self.add_red_noise_power(A=self.amp, gamma=self.gamma, vals=True) #1D array
-        C_rn = np.zeros(shape=(2*nf,2*nf))        
-        for i in range(nf):
-            C_rn[2*i,2*i] = C_rn_proto[i]
-            C_rn[2*i+1,2*i+1] = C_rn_proto[i]
+
+
+        #print(np.all(G_inv == self.G.T))
+        #z = self.G @ np.linalg.inv(self.K) @ self.G.T
+        #sigma = F.T @ np.linalg.inv(z) @ F + np.linalg.inv(C_rn)
+        #a,b,c = np.linalg.svd(self.G)
+        #inv_b = np.linalg.inv(b)
+        #inv_G = c@inv_b@c
+        #inv_G_T = a@inv_b.T@a.T
+
+
 
        
 
-        Ncal = self.K + self.J @ C_rn @ self.J.T
-        NcalInv = np.linalg.inv(Ncal)
 
-        TfN = jnp.matmul(np.conjugate(Gtilde),jnp.matmul(NcalInv,Gtilde.T)) / 2
-
-        if return_Gtilde_Ncal:
-            return np.real(TfN), Gtilde, Ncal
-        elif full_matrix:
-            return np.real(TfN)
-        else:
-            return np.real(np.diag(TfN)) / get_Tspan([self])
+        #val = self.G.T@F@C_rn@F.T@self.G
+        #Ncal = self.K + val
+        #NcalInv = np.linalg.inv(Ncal)
+        TfN = jnp.matmul(np.conjugate(Gtilde),jnp.matmul(t1,Gtilde.T)) / 2   #consistly scaling off * 1e22
+        return np.real(np.diag(TfN)) / get_Tspan([self])
         
     
         #D = self.N + (F @ C_rn @ F.T)
@@ -646,7 +665,7 @@ class RRF_Spectrum(object):
         """
         if not hasattr(self, '_h_c'):
             #needed to make S_I positive
-            self._h_c = np.sqrt(self.freqs * abs(self.S_I))
+            self._h_c = np.sqrt(self.freqs * self.S_I)
         return self._h_c
 
     @property

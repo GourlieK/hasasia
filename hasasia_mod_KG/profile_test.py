@@ -407,8 +407,8 @@ if __name__ == '__main__':
 
     null_time = time.time()
     Ncal_time_file.write(f'{null_time}\n')
-    kill_count = 1
-    thin = 10
+    kill_count = 34
+    thin = 1
     #code under this is profiled
     
     with cProfile.Profile() as pr:
@@ -423,14 +423,15 @@ if __name__ == '__main__':
 
         #computes hasasia, and hasasia spectra pulsar to get characteristic strain
         
-        psrs_names_r, h_c_list_r,  freqs_list_r, NcalInv_r = rrf_array_construction(ePsrs)
+        #psrs_names_r, h_c_list_r,  freqs_list_r, NcalInv_r = rrf_array_construction(ePsrs)
         psrs_names, h_c_list,  freqs_list, NcalInv = array_construction(ePsrs)
-      
+        psrs_names_r, h_c_list_r,  freqs_list_r, NcalInv_r = rrf_array_construction(ePsrs)
+        
      
-        for i in range(len(psrs_names)):
-           for j in range(len(NcalInv[i])):
-                diff = (NcalInv_r[i]/NcalInv[i])
-                print(diff)
+        #for i in range(len(psrs_names)):
+        #   for j in range(len(NcalInv[i])):
+        #        diff = (NcalInv_r[i]-NcalInv[i])
+        #        print(diff)
         
 
 
@@ -443,8 +444,8 @@ if __name__ == '__main__':
             stats.print_stats()
 
         for i in range(len(psrs_names_r)):
-            plt.loglog(freqs_list_r[i],h_c_list_r[i],lw=2,label=psrs_names_r[i])
             plt.loglog(freqs_list[i],h_c_list[i],lw=2,label=psrs_names[i])
+            plt.loglog(freqs_list_r[i],h_c_list_r[i],lw=2,label=f'{psrs_names_r[i]} rrf')
         plt.rc('text', usetex=True)
         plt.xlabel('Frequency [Hz]')
         plt.ylabel('Characteristic Strain, $h_c$')
