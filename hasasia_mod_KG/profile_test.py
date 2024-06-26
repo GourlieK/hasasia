@@ -1,6 +1,8 @@
 #Kyle Gourlie
 #8/2/2023
-import shutil
+#library imports
+import shutil, h5py
+import gc
 import numpy as np
 import scipy.linalg as sl
 import matplotlib.pyplot as plt
@@ -17,44 +19,41 @@ from memory_profiler import profile
 
 
 
-#memory profile files
+#Memory Profile File Locations
 path = r'/home/gourliek/Desktop/Profile_Data'
 try:
     os.mkdir(path)
 except FileExistsError:
     shutil.rmtree(path)
     os.mkdir(path)
+#white noise covariance matrix profile file
 corr_matrix_mem = open(path + '/corr_matrix_mem.txt','w')
+#Default creation of characteristic strain profile file 
 sens_mem = open(path + '/sens_mem.txt','w')
+#Rank Reduced Formalism creation of characteristic strain profile file
 sens_mem_RRF= open(path + '/sens_mem_RRF.txt','w')
+#Total time taken to generate each pulsar 
 time_increments = open(path + '/psr_increm.txt','w')
+#Default profile file to generate NcalInv (bottle neck for computation)
+hc_time_file = open(path + '/hc_time.txt','w')
+#Rank Reduced Formalism file to generate NcalInv (bottle neck for computation)
+hc_RRF_time_file = open(path + '/hc_time_RRF.txt','w')
 Ncal_time_file = open(path + '/Ncal_meth_time.txt','w')
 
 
 
-#using modified imports
+#hasasia imports that are modified so they can be benchmarked
 import sensitivity as hsen
 import sim as hsim
 import skymap as hsky
-from sensitivity import get_NcalInv_mem, corr_from_psd_mem
+#needed to profile within sensitivity library
+from sensitivity import get_NcalInv_mem, get_NcalInv_RFF_mem, corr_from_psd_mem
 ################################################################################################################
 ################################################################################################################
 ################################################################################################################
+#Important Functions Created from 11-yr tutorial
 def get_psrname(file,name_sep='_'):
     return file.split('/')[-1].split(name_sep)[0]
-
-
-
-def rn_corr(freqs, T_obs,Amps, Gams):
-    rn_corr = np.identity(2*freqs.size)
-    #iterates over only the diagonal
-    for i in range(rn_corr.shape[0]):
-        for j in range(i,rn_corr.shape[1]):
-            f_j = j/T_obs
-            rn_corr[i,j] = (Amps[i]**2)/(12*np.pi**2) * 1/T_obs * (f_j/fyr)**(-Gams[i])
-    
-    return rn_corr
-
 
 
 def pulsar_class(parameters, timons):
@@ -89,6 +88,7 @@ def make_corr(psr):
     Returns:
         corr (array): white noise covariance matrix
     """
+    corr_matrix_mem.write(f"{psr.name}\n")
     N = psr.toaerrs.size
     corr = np.zeros((N,N))
     _, _, fl, _, bi = hsen.quantize_fast(psr.toas,psr.toaerrs,
@@ -114,6 +114,15 @@ def make_corr(psr):
     corr = np.diag(sigma_sqr) + J #ISSUE HERE WHEN RUNNING J1713
     return corr
 
+#create white noise covariance matrix from enterprise pulsar 
+def white_corr(epsrs):
+    wn_list = []
+    for ePsr in epsrs:
+        wn_list.append(make_corr(ePsr)[::thin,::thin])
+    
+    return wn_list
+
+
 
 @profile(stream=sens_mem_RRF)
 def rrf_array_construction(epsrs):
@@ -121,63 +130,61 @@ def rrf_array_construction(epsrs):
     psrs_names = []
     h_c_list = []
     freqs_list = []
-    NcalInv_rrf_list = []
-    
-
+  
     #iterates through each enterprise pulsar
     for ePsr in epsrs:
-
         #benchmark stuff
-        corr_matrix_mem.write(f'Pulsar: {ePsr.name}\n')
-        get_NcalInv_mem.write(f'Pulsar: {ePsr.name}\n')
-        corr_from_psd_mem.write(f'Pulsar: {ePsr.name}\n')
+        get_NcalInv_RFF_mem.write(f'Pulsar: {ePsr.name}\n')
+    
         start_time = time.time()
-      
-            
-        #if red noise parameters for an individual pulsar is present, add it to standard red noise
-        if ePsr.name in rn_psrs.keys():
-            Amp, gam = rn_psrs[ePsr.name]
+          
+        #creating hasasia pulsar tobject 
+        psr = hsen.Pulsar(toas=ePsr.toas[::thin],
+                            toaerrs=ePsr.toaerrs[::thin],
+                            phi=ePsr.phi,theta=ePsr.theta, 
+                            N=ePsr.white_corr, designmatrix=ePsr.Mmat[::thin,:])
+        
+        #setting name of hasasia pulsar
+        psr.name = ePsr.name
+        #extra variable needed for benchmarking
+        psr_name = psr.name
+
+        #enterprise pulsar is no longer needed
+        del ePsr
+        print(f"Hasasia Pulsar {psr.name} created\n")
+        psrs_names.append(psr.name)
        
-         
-            #create white noise covariance matrix from enterprise pulsar 
-            wn_corr = make_corr(ePsr)[::thin,::thin]
-            
-            #creating hasasia pulsar tobject 
-            psr = hsen.Pulsar(toas=ePsr.toas[::thin],
-                                toaerrs=ePsr.toaerrs[::thin],
-                                phi=ePsr.phi,theta=ePsr.theta, 
-                                N=wn_corr, designmatrix=ePsr.Mmat[::thin,:])
-            
-            #setting name of hasasia pulsar
-            psr.name = ePsr.name
-            #extra variable needed for benchmarking
-            psr_name = psr.name
-
-            #enterprise pulsar is no longer needed
-            del ePsr
-            print(f"Hasasia Pulsar {psr.name} created\n")
-            psrs_names.append(psr.name)
-
+        #if red noise parameters for an individual pulsar is present, add it to standard red noise
+        if psr.name in rn_psrs.keys():
+            Amp, gam = rn_psrs[psr.name]
             #creates spectrum hasasia pulsar to calculate characteristic straing
             spec_psr = hsen.RRF_Spectrum(psr, amp = Amp, gamma = gam, freqs=freqs)
+            spec_psr.name = psr.name
+        
+        else:
+            #creates spectrum hasasia pulsar to calculate characteristic straing
+            spec_psr = hsen.RRF_Spectrum(psr, freqs=freqs)
+            spec_psr.name = psr.name
+       
+        #hasasia pulsar no longer needed
+        del psr
+        hc_time_start = time.time()
+        h_c_list.append(spec_psr.h_c)
+        freqs_list.append(spec_psr.freqs)
+        hc_time_end = time.time()
+        hc_RRF_time_file.write(f"RRF{psr_name}\t{hc_time_end-hc_time_start}\n")
 
-            #hasasia pulsar no longer needed
-            del psr
-            #_ = spec_psr.NcalInv
+      
+        del spec_psr
 
-            h_c_list.append(spec_psr.h_c)
-            freqs_list.append(spec_psr.freqs)
-            NcalInv_rrf_list.append(spec_psr.NcalInv)
-            del spec_psr
+        print(f"Hasasia Spectrum Pulsar {psr_name} created\n")
 
-            print(f"Hasasia Spectrum Pulsar {psr_name} created\n")
-
-            #benchmark stuff
-            end_time = time.time()
-            time_increments.write(f" RRF{psr_name} {start_time-null_time} {end_time-null_time}\n")
-            print('\rPSR {0} complete'.format(psr_name),end='',flush=True)
+        #benchmark stuff
+        end_time = time.time()
+        time_increments.write(f" RRF{psr_name} {start_time-null_time} {end_time-null_time}\n")
+        print('\rPSR {0} complete'.format(psr_name),end='',flush=True)
     
-    return psrs_names, h_c_list,  freqs_list, NcalInv_rrf_list
+    return psrs_names, h_c_list,  freqs_list
 
 
 
@@ -188,21 +195,15 @@ def array_construction(epsrs):
     psrs_names = []
     h_c_list = []
     freqs_list = []
-    NcalInv_list = []
-    
 
     #iterates through each enterprise pulsar
     for ePsr in epsrs:
 
         #benchmark stuff
-        corr_matrix_mem.write(f'Pulsar: {ePsr.name}\n')
         get_NcalInv_mem.write(f'Pulsar: {ePsr.name}\n')
         corr_from_psd_mem.write(f'Pulsar: {ePsr.name}\n')
+        
         start_time = time.time()
-      
-        #create white noise covariance matrix from enterprise pulsar 
-        corr = make_corr(ePsr)[::thin,::thin]
-
         #building red noise powerlaw using standard amplitude and gamma
         plaw = hsen.red_noise_powerlaw(A=9e-16, gamma=13/3., freqs=freqs)
 
@@ -212,14 +213,14 @@ def array_construction(epsrs):
             plaw += hsen.red_noise_powerlaw(A=Amp, gamma=gam, freqs=freqs)
 
         #adding red noise components to the noise covariance matrix via power spectral density
-        corr += hsen.corr_from_psd(freqs=freqs, psd=plaw,
+        ePsr.white_corr += hsen.corr_from_psd(freqs=freqs, psd=plaw,
                                     toas=ePsr.toas[::thin])   
         
         #creating hasasia pulsar tobject 
         psr = hsen.Pulsar(toas=ePsr.toas[::thin],
                             toaerrs=ePsr.toaerrs[::thin],
                             phi=ePsr.phi,theta=ePsr.theta, 
-                            N=corr, designmatrix=ePsr.Mmat[::thin,:])
+                            N=ePsr.white_corr, designmatrix=ePsr.Mmat[::thin,:])
         
         #setting name of hasasia pulsar
         psr.name = ePsr.name
@@ -233,13 +234,16 @@ def array_construction(epsrs):
 
         #creates spectrum hasasia pulsar to calculate characteristic straing
         spec_psr = hsen.Spectrum(psr, freqs=freqs)
+        spec_psr.name = psr.name
 
         #hasasia pulsar no longer needed
         del psr
 
-        NcalInv_list.append(spec_psr.NcalInv)
+        time_hc_start = time.time()
         h_c_list.append(spec_psr.h_c)
         freqs_list.append(spec_psr.freqs)
+        time_hc_end = time.time()
+        hc_time_file.write(f"{psr_name}\t{time_hc_end - time_hc_start}\n")
         del spec_psr
 
         print(f"Hasasia Spectrum Pulsar {psr_name} created\n")
@@ -249,7 +253,7 @@ def array_construction(epsrs):
         time_increments.write(f"{psr_name} {start_time-null_time} {end_time-null_time}\n")
         print('\rPSR {0} complete'.format(psr_name),end='',flush=True)
         
-    return psrs_names, h_c_list,  freqs_list, NcalInv_list
+    return psrs_names, h_c_list,  freqs_list
 
 
 
@@ -398,45 +402,128 @@ def yr_12_data():
     return par_files, tim_files, noise, psr_name_list, red_noise, white_noise
 
 
+def pulsar_entry():
+    ePsrs = pulsar_class(pars, tims)
+    Tspan = hsen.get_Tspan(ePsrs)
+
+    #weird format HDF5 shit for list of strings
+    name_list = np.array(['X' for _ in range(kill_count)], dtype=h5py.string_dtype(encoding='utf-8'))
+    #string_dt = h5py.special_dtype(vlen=str)
+
+
+    wn_corrs = white_corr(ePsrs)
+    
+    for i in range(len(ePsrs)):
+        ePsrs[i].N = wn_corrs[i]
+    
+    del wn_corrs
+
+    with h5py.File(r'/home/gourliek/11_yr_enterprise_pulsars.hdf5', 'w') as f:
+        Tspan_h5 = f.create_dataset('Tspan', (1,), float)
+        Tspan_h5[:] = Tspan
+        
+
+        for i in range(len(ePsrs)): 
+            hdf5_psr = f.create_group(ePsrs[i].name)
+            toas = hdf5_psr.create_dataset('toas', ePsrs[i].toas.shape, ePsrs[i].toas.dtype)
+            toaerrs = hdf5_psr.create_dataset('toaerrs', ePsrs[i].toaerrs.shape,ePsrs[i].toaerrs.dtype)
+            phi = hdf5_psr.create_dataset('phi', (1,), float)
+            theta = hdf5_psr.create_dataset('theta', (1,), float)
+            
+            if hasattr(ePsrs[i], 'designmatrix'):
+                designmatrix = hdf5_psr.create_dataset('designmatrix', ePsrs[i].designmatrix.shape, ePsrs[i].designmatrix.dtype)
+                designmatrix[:] = ePsrs[i].designmatrix
+
+            WN = hdf5_psr.create_dataset('N', ePsrs[i].N.shape, ePsrs[i].N.dtype)
+            pdist = hdf5_psr.create_dataset('pdist', (2,), float)
+            
+            toas[:] = ePsrs[i].toas
+            toaerrs[:] = ePsrs[i].toaerrs
+            phi[:] = ePsrs[i].phi
+            theta[:] = ePsrs[i].theta
+            WN[:] = ePsrs[i].N
+            pdist[:] = ePsrs[i].pdist
+
+            f.flush()
+            name_list[i] = ePsrs[i].name
+
+        del ePsrs[:]
+        f.create_dataset('names',data =name_list)
+        gc.collect()
+  
+ 
+        
+
+
+
+
+
 
 ################################################################################################################
 ################################################################################################################
 ################################################################################################################
 if __name__ == '__main__':
-    
-
     null_time = time.time()
     Ncal_time_file.write(f'{null_time}\n')
-    kill_count = 34
+    kill_count = 3  #max is 34 for 11yr dataset
     thin = 1
     #code under this is profiled
-    
-    with cProfile.Profile() as pr:
-    #all information tied to the 11-year dataset
-        psr_list, pars, tims, noise, rn_psrs = yr_11_data()
 
-        #creates enterprise pulsar
-        ePsrs = pulsar_class(pars, tims)
-        Tspan = hsen.get_Tspan(ePsrs)
+ 
+    #read time data for profiling
+    with cProfile.Profile() as pr:
+        #all information tied to the 11-year dataset
+        psr_list, pars, tims, noise, rn_psrs = yr_11_data()
+        #IF you need to re-create enterprise pulsars
+        #pulsar_entry()
+        
+        #To access data in hdf5, need names of pulsars first
+        #Some other data also like Tspan as well
+        names_list = [] 
+   
+        with h5py.File(r'/home/gourliek/11_yr_enterprise_pulsars.hdf5', 'r') as f:
+            #memory map to hdf5 file
+            Tspan_pt = f['Tspan']
+            names_pt = f['names']
+
+            #disk to memory
+            Tspan = Tspan_pt[:][0]
+            names = names_pt[:]
+
+            #converting byte strings to strings. This is how I could write list of strings to hdf5
+            for byte_name in names:
+                names_list.append(names[0].decode('utf-8'))
+
+            
+            for name in names_list:
+                psr = f[name]
+                print(psr['toas'][:])
+                print()
+                #ePsrs.append(f[name][:])
+
+
+        
+        #print(Tspan)
+        #print(ePsrs)
+        '''
+        exit()
+
+    
+        #generate function that pickles all enterprise pulsars
+        #have choice to pickle then unpickle
+        #unpickle one at a time to generate hasasia spectrum
+
+        
+        
         fyr = 1/(365.25*24*3600)
         freqs = np.logspace(np.log10(1/(5*Tspan)),np.log10(2e-7),200)
 
-        #computes hasasia, and hasasia spectra pulsar to get characteristic strain
         
-        #psrs_names_r, h_c_list_r,  freqs_list_r, NcalInv_r = rrf_array_construction(ePsrs)
-        psrs_names, h_c_list,  freqs_list, NcalInv = array_construction(ePsrs)
-        psrs_names_r, h_c_list_r,  freqs_list_r, NcalInv_r = rrf_array_construction(ePsrs)
+        #ePsrs_copy = copy.deepcopy(ePsrs)
         
-     
-        #for i in range(len(psrs_names)):
-        #   for j in range(len(NcalInv[i])):
-        #        diff = (NcalInv_r[i]-NcalInv[i])
-        #        print(diff)
-        
-
-
-
-        #print(NcalInv_r[0]-NcalInv[0])
+        psrs_names, h_c_list,  freqs_list = array_construction(ePsrs)
+        psrs_names_r, h_c_list_r,  freqs_list_r= rrf_array_construction(ePsrs)
+        del ePsrs
 
         with open(path + '/test_time.txt', "w") as file:
             stats = pstats.Stats(pr, stream=file)
@@ -444,22 +531,26 @@ if __name__ == '__main__':
             stats.print_stats()
 
         for i in range(len(psrs_names_r)):
-            plt.loglog(freqs_list[i],h_c_list[i],lw=2,label=psrs_names[i])
             plt.loglog(freqs_list_r[i],h_c_list_r[i],lw=2,label=f'{psrs_names_r[i]} rrf')
+        plt.rc('text', usetex=True)
+        plt.xlabel('Frequency [Hz]')
+        plt.ylabel('Characteristic Strain vs Frequency, $h_c$')
+        plt.legend(loc='upper left')
+        plt.title('Characteristic Strain RRF')
+        plt.savefig(path+'/h_c_RRF.png')
+        plt.close()
+
+
+        for i in range(len(psrs_names)):
+            plt.loglog(freqs_list[i],h_c_list[i],lw=2,label=psrs_names[i])
         plt.rc('text', usetex=True)
         plt.xlabel('Frequency [Hz]')
         plt.ylabel('Characteristic Strain, $h_c$')
         plt.legend(loc='upper left')
-        plt.show()
-        plt.savefig(path+'/h_c_RRF.png')
+        plt.title('Characteristic Strain vs Frequency')
+        plt.savefig(path+'/h_c.png')
         plt.close()
 
-        #for i in range(len(psrs_names)):
-        #    plt.loglog(freqs_list[i],h_c_list[i],lw=2,label=psrs_names[i])
-        #plt.rc('text', usetex=True)
-        #plt.xlabel('Frequency [Hz]')
-        #plt.ylabel('Characteristic Strain, $h_c$')
-        #plt.legend(loc='upper left')
-        #plt.show()
-        #plt.savefig(path+'/h_c.png')
-        #plt.close()
+        '''
+
+    
