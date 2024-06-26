@@ -2,6 +2,7 @@
 from __future__ import print_function
 """Main module."""
 import numpy  as np
+from functools import cached_property
 import jax
 import jax.numpy as jnp
 import jax.scipy as jsc
@@ -371,6 +372,7 @@ class Pulsar(object):
         self.phi = phi
         self.theta = theta
         self.pdist = make_quant(pdist,'kpc')
+        #for caching
 
         if N is None:
             self.N = np.diag(toaerrs**2) #N ==> weights
@@ -390,7 +392,7 @@ class Pulsar(object):
             self._G = G_matrix(designmatrix=self.designmatrix)
         return self._G
     
-    @property
+    @cached_property
     @profile(stream = get_K_inv_mem) 
     def K_inv(self):
         get_K_inv_mem.write(f"{self.name}\n")
@@ -401,10 +403,11 @@ class Pulsar(object):
         L = sl.cholesky(self.N)          
         A = jnp.matmul(L,self.G)
         del L
-        self._K_inv = np.linalg.inv(jnp.matmul(A.T,A))
+        K = jnp.matmul(A.T,A)
         del A
+        self._K_inv = np.linalg.inv(K)
+        del K
         return self._K_inv
-
 
 #KG rrf changes
 class RRF_Spectrum(object):
@@ -449,7 +452,6 @@ class RRF_Spectrum(object):
         self.phi = psr.phi
         self.theta = psr.theta
 
-        self.N = psr.N
         self.G = psr.G
         self.K_inv = psr.K_inv
 
@@ -514,7 +516,7 @@ class RRF_Spectrum(object):
         
         else:
             #creation of fourier coeffiecent covariance matrix, and computes inverse
-            C_rn_proto = self.add_red_noise_power(A=self.amp, gamma=self.gamma, vals=True)  
+            C_rn_proto = self.add_red_noise_power(A=self.amp, gamma=self.gamma, vals=True)
             C_rn_inv = np.zeros((2*nf, 2*nf))
             C_rn_inv[::2, ::2] = np.diag(1/C_rn_proto)   #odd elements
             C_rn_inv[1::2, 1::2] = np.diag(1/C_rn_proto) #even elements
