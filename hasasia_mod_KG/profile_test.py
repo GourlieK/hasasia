@@ -66,9 +66,12 @@ class PseudoPulsar:
         self.pdis = pdist
 
 
-
-
 def get_psrname(file,name_sep='_'):
+    """Function that grabs names of pulsars from parameter files
+    
+    Returns:
+        Pulsar name
+    """
     return file.split('/')[-1].split(name_sep)[0]
 
 
@@ -120,18 +123,24 @@ def make_corr(psr):
         sigma_sqr[mask] = (noise[key_ef]**2 * (psr.toaerrs[mask]**2)
                            + (10**noise[key_eq])**2)
         mask_ec = np.where(fl==be)
-        #KG jax mod.
-        #mask_ec = np.where(np.atleast_1d(fl == be).nonzero())
         key_ec = '{0}_{1}_log10_{2}'.format(psr.name,be,'ecorr')
         ecorrs[mask_ec] = np.ones_like(mask_ec) * (10**noise[key_ec])
     j = [ecorrs[ii]**2*np.ones((len(bucket),len(bucket)))
          for ii, bucket in enumerate(bi)] 
     J = sl.block_diag(*j)
-    corr = np.diag(sigma_sqr) + J #ISSUE HERE WHEN RUNNING J1713
+    corr = np.diag(sigma_sqr) + J
     return corr
 
 #create white noise covariance matrix from enterprise pulsar 
 def white_corr(epsrs):
+    """Generates a list of white noise covariance matrices
+
+    Args:
+        epsrs (enterprise.pulsar): pulsar 
+
+    Returns:
+        wn_list (list): list of white noise corvariance matrices
+    """
     wn_list = []
     for ePsr in epsrs:
         wn_list.append(make_corr(ePsr)[::thin,::thin])
@@ -145,7 +154,7 @@ def rrf_array_construction(ePsr, freqs):
     
     #benchmark stuff
     get_NcalInv_RFF_mem.write(f'Pulsar: {ePsr.name}\n')
-
+    hc_time_start = time.time()
     start_time = time.time()
         
     #creating hasasia pulsar tobject 
@@ -164,6 +173,7 @@ def rrf_array_construction(ePsr, freqs):
     #enterprise pulsar is no longer needed
     del ePsr
     print(f"Hasasia Pulsar {psr.name} created\n")
+    #spectra_entry(psr)
     hc_time_start = time.time()
     
     #if red noise parameters for an individual pulsar is present, add it to standard red noise
@@ -192,8 +202,6 @@ def rrf_array_construction(ePsr, freqs):
    
     hc_RRF_time_file.write(f"RRF{name}\t{hc_time_end-hc_time_start}\n")
 
-    
-
     print(f"Hasasia Spectrum RRF Pulsar {name} created\n")
 
     #benchmark stuff
@@ -211,7 +219,6 @@ def array_construction(ePsr, freqs):
     #benchmark stuff
     get_NcalInv_mem.write(f'Pulsar: {ePsr.name}\n')
     corr_from_psd_mem.write(f'Pulsar: {ePsr.name}\n')
-    
     start_time = time.time()
     #building red noise powerlaw using standard amplitude and gamma
     plaw = hsen.red_noise_powerlaw(A=9e-16, gamma=13/3., freqs=freqs)
@@ -464,22 +471,35 @@ def pulsar_entry():
         del ePsrs[:]
         f.flush()
         gc.collect()
+
+def spectra_entry(psr, type__):
+    if type__ == 'og':
+        path = r'/home/gourliek/11_yr_spectra_pulsars_og.hdf5'
+
+    elif type__ == 'rrf':
+        path = r'/home/gourliek/11_yr_spectra_pulsars_rrf.hdf5'
+        
+    with h5py.File(path, 'w') as f:
+        hdf5_psr = f.create_group(psr.name)
+        toas = hdf5_psr.create_dataset('toas', psr.toas.shape, psr.toas.dtype, data=psr.toas)
+        toaerrs = hdf5_psr.create_dataset('toaerrs', psr.toaerrs.shape,psr.toaerrs.dtype, data=psr.toaerrs)
+        phi = hdf5_psr.create_dataset('phi', (1,), float, data=psr.phi)
+        theta = hdf5_psr.create_dataset('theta', (1,), float, data=psr.theta)
+        designmatrix = hdf5_psr.create_dataset('designmatrix', psr.designmatrix.shape, psr.designmatrix.dtype, data=psr.designmatrix)
+        G = hdf5_psr.create_dataset('G', psr.G.shape, psr.G.dtype, data=psr.G)
+        K_inv = hdf5_psr.create_dataset('K_inv', psr.K_inv.shape, psr.K_inv.dtype, data=psr.K_inv)
+        f.flush()
+
+
   
  
-        
-
-
-
-
-
-
 ################################################################################################################
 ################################################################################################################
 ################################################################################################################
 if __name__ == '__main__':
     null_time = time.time()
     Ncal_time_file.write(f'{null_time}\n')
-    kill_count = 5  #max is 34 for 11yr dataset
+    kill_count = 34  #max is 34 for 11yr dataset
     thin = 1
 
     #lists for plotting sensitivity curves
@@ -488,10 +508,6 @@ if __name__ == '__main__':
     freqs_list = []
     names_list = [] 
     fyr = 1/(365.25*24*3600)
-    
-
-
-
  
     #read time data for profiling
     with cProfile.Profile() as pr:
@@ -516,8 +532,8 @@ if __name__ == '__main__':
             freqs = np.logspace(np.log10(1/(5*Tspan)),np.log10(2e-7),200)
 
             #converting byte strings to strings. This is how I could write list of strings to hdf5
-            for byte_name in names:
-                names_list.append(byte_name.decode('utf-8'))
+            for i in range(kill_count):
+                names_list.append(names[i].decode('utf-8'))
 
             #this will loop through every pulsar created from HDF5 file
             for name in names_list:
@@ -527,7 +543,6 @@ if __name__ == '__main__':
                                       theta = psr['theta'][:], pdist=psr['pdist'][:], N=psr['N'][:])
                 pseudo.name = name
                 pseudo.Mmat= psr['designmatrix'][:]
-                
 
                 #getting characteristic strains from origonal and rrf method:
                 h_c= array_construction(pseudo, freqs)
@@ -536,8 +551,6 @@ if __name__ == '__main__':
                 h_c_list.append(h_c)
                 h_c_list_r.append(h_c_rrf)
                 freqs_list.append(freqs)
-
-
                 del pseudo
 
             

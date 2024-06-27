@@ -306,17 +306,10 @@ def get_NcalInv(psr, nf=200, fmin=None, fmax=2e-7, freqs=None,
     Gtilde = np.dot(np.exp(1j*2*np.pi*ff[:,np.newaxis]*toas),G)
     # N_freq x N_TOA-N_par
 
-    L = jsc.linalg.cholesky(psr.N)            
-    A = jnp.matmul(L,G)
-    del L
-    Ncal = jnp.matmul(A.T,A)
-    del A
-    NcalInv = jnp.linalg.inv(Ncal)
-
-    TfN = jnp.matmul(np.conjugate(Gtilde),jnp.matmul(NcalInv,Gtilde.T)) / 2
+    TfN = jnp.matmul(np.conjugate(Gtilde),jnp.matmul(psr.K_inv,Gtilde.T)) / 2
 
     if return_Gtilde_Ncal:
-        return np.real(TfN), Gtilde, Ncal
+        return np.real(TfN), Gtilde, np.linalg.inv(psr.K_inv)
     elif full_matrix:
         return np.real(TfN)
     else:
@@ -504,8 +497,6 @@ class RRF_Spectrum(object):
                                   **self.Tf_kwargs)
         return self._Tf
     
-    
-
     @property
     @profile(stream = get_NcalInv_RFF_mem)
     def NcalInv(self, full_matrix=False, return_Gtilde_Ncal=False):
@@ -513,7 +504,6 @@ class RRF_Spectrum(object):
         #for pulsars with no red noise power
         if self.gamma == None or self.amp == None:
             C_rn_inv = np.zeros((2*nf, 2*nf))
-        
         else:
             #creation of fourier coeffiecent covariance matrix, and computes inverse
             C_rn_proto = self.add_red_noise_power(A=self.amp, gamma=self.gamma, vals=True)
@@ -521,13 +511,13 @@ class RRF_Spectrum(object):
             C_rn_inv[::2, ::2] = np.diag(1/C_rn_proto)   #odd elements
             C_rn_inv[1::2, 1::2] = np.diag(1/C_rn_proto) #even elements
             del C_rn_proto
-
+            
+        #cholesky decomposition speed up for symmetric matrix multiplication
         L = sl.cholesky(self.K_inv)
         A = jnp.matmul(L, self.J)
         del L
         Sigma = jnp.matmul(A.T, A) + C_rn_inv 
         del A
-        #Sigma = jnp.matmul(self.J.T, jnp.matmul(self.K_inv, self.J)) + C_rn_inv   #could be faster to do Cholesky trick here
         SigmaInv = np.linalg.inv(Sigma)
         Z = jnp.matmul(SigmaInv, jnp.matmul(self.J.T, self.K_inv))
         del SigmaInv
@@ -535,7 +525,7 @@ class RRF_Spectrum(object):
         Gtilde = np.zeros((self.freqs.size,self.G.shape[1]),dtype='complex128')
         Gtilde = jnp.dot(np.exp(1j*2*np.pi*self.freqs[:,np.newaxis]*self.toas),self.G)
 
-        NcalInv = self.K_inv + jnp.matmul(Z.T, jnp.matmul(Sigma, Z))   #could be faster to do Cholesky trick here
+        NcalInv = self.K_inv + jnp.matmul(Z.T, jnp.matmul(Sigma, Z))   
         del Sigma, Z
 
         TfN = jnp.matmul(np.conjugate(Gtilde),jnp.matmul(NcalInv,Gtilde.T)) / 2
@@ -547,16 +537,6 @@ class RRF_Spectrum(object):
         else:
             return np.real(np.diag(TfN)) / get_Tspan([self])
             
-     
-        #look at ways to cache WN parameters 
-        #look at what things need to be calculated without red noise parameters
-        #rewrite the test script to prep it for use of JAX and Dask
-        #test speeds of runs and compare it with Cholesky Decomp to speed up matrix mult
-        #rewrtite test script as jupyter script
-
-       
-
-
     @property
     def P_n(self):
         """Inverse Noise Weighted Transmission Function."""
@@ -706,7 +686,7 @@ class Spectrum(object):
         self.toaerrs = psr.toaerrs
         self.phi = psr.phi
         self.theta = psr.theta
-        self.N = psr.N
+        self.K_inv = psr.K_inv
         self.G = psr.G
         self.designmatrix = psr.designmatrix
         self.pdist = psr.pdist
