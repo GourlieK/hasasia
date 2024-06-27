@@ -191,8 +191,6 @@ def rrf_array_construction(ePsr, freqs):
     #hasasia pulsar no longer needed
     del psr
 
-    
-
     #grabbing wanted data
     h_c = spec_psr.h_c
 
@@ -252,8 +250,6 @@ def array_construction(ePsr, freqs):
 
     #hasasia pulsar no longer needed
     del psr
-
-    
 
     #grabbing data that I want from each pulsar
     h_c = spec_psr.h_c
@@ -426,13 +422,11 @@ def pulsar_entry():
     ePsrs = pulsar_class(pars, tims)
     Tspan = hsen.get_Tspan(ePsrs)
 
-    #weird format HDF5 shit for list of strings
+    #weird format HDF5 for list of strings
     name_list = np.array(['X' for _ in range(kill_count)], dtype=h5py.string_dtype(encoding='utf-8'))
-    #string_dt = h5py.special_dtype(vlen=str)
-
-
+    #computes all white noise covariance matrices for all the pulsars, a list of matrices
     wn_corrs = white_corr(ePsrs)
-    
+    #adds each white noise covariance matrix as an attribute
     for i in range(len(ePsrs)):
         ePsrs[i].N = wn_corrs[i]
     
@@ -442,31 +436,18 @@ def pulsar_entry():
         Tspan_h5 = f.create_dataset('Tspan', (1,), float)
         Tspan_h5[:] = Tspan
         
-
         for i in range(len(ePsrs)): 
             hdf5_psr = f.create_group(ePsrs[i].name)
-            toas = hdf5_psr.create_dataset('toas', ePsrs[i].toas.shape, ePsrs[i].toas.dtype)
-            toaerrs = hdf5_psr.create_dataset('toaerrs', ePsrs[i].toaerrs.shape,ePsrs[i].toaerrs.dtype)
-            phi = hdf5_psr.create_dataset('phi', (1,), float)
-            theta = hdf5_psr.create_dataset('theta', (1,), float)
-            designmatrix = hdf5_psr.create_dataset('designmatrix', ePsrs[i].Mmat.shape, ePsrs[i].Mmat.dtype)
-                
-
-            WN = hdf5_psr.create_dataset('N', ePsrs[i].N.shape, ePsrs[i].N.dtype)
-            pdist = hdf5_psr.create_dataset('pdist', (2,), float)
-            
-            toas[:] = ePsrs[i].toas
-            toaerrs[:] = ePsrs[i].toaerrs
-            phi[:] = ePsrs[i].phi
-            theta[:] = ePsrs[i].theta
-            WN[:] = ePsrs[i].N
-            pdist[:] = ePsrs[i].pdist
-            designmatrix[:] = ePsrs[i].Mmat
-
-            f.flush()
+            toas = hdf5_psr.create_dataset('toas', ePsrs[i].toas.shape, ePsrs[i].toas.dtype, data=ePsrs[i].toas)
+            toaerrs = hdf5_psr.create_dataset('toaerrs', ePsrs[i].toaerrs.shape,ePsrs[i].toaerrs.dtype, data=ePsrs[i].toaerrs)
+            phi = hdf5_psr.create_dataset('phi', (1,), float, data=ePsrs[i].phi)
+            theta = hdf5_psr.create_dataset('theta', (1,), float, data=ePsrs[i].theta)
+            designmatrix = hdf5_psr.create_dataset('designmatrix', ePsrs[i].Mmat.shape, ePsrs[i].Mmat.dtype, data=ePsrs[i].Mmat)
+            WN = hdf5_psr.create_dataset('N', ePsrs[i].N.shape, ePsrs[i].N.dtype, data=ePsrs[i].N)
+            pdist = hdf5_psr.create_dataset('pdist', (2,), float, data=ePsrs[i].pdist)
             name_list[i] = ePsrs[i].name
-
-        
+            f.flush()
+            
         f.create_dataset('names',data =name_list)
         del ePsrs[:]
         f.flush()
