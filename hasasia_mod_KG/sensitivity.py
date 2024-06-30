@@ -447,6 +447,7 @@ class RRF_Spectrum(object):
 
         self.G = psr.G
         self.K_inv = psr.K_inv
+        #self.N = psr.N 
 
         self.designmatrix = psr.designmatrix
         self.pdist = psr.pdist
@@ -513,11 +514,12 @@ class RRF_Spectrum(object):
             del C_rn_proto
             
         #cholesky decomposition speed up for symmetric matrix multiplication
-        L = sl.cholesky(self.K_inv)
-        A = jnp.matmul(L, self.J)
-        del L
-        Sigma = jnp.matmul(A.T, A) + C_rn_inv 
-        del A
+        #L = sl.cholesky(self.K_inv)
+        #A = jnp.matmul(L, self.J)
+        #del L
+        #Sigma = jnp.matmul(A.T, A) + C_rn_inv 
+        #del A
+        Sigma = jnp.matmul(self.J.T, jnp.matmul(self.K_inv, self.J))
         SigmaInv = np.linalg.inv(Sigma)
         Z = jnp.matmul(SigmaInv, jnp.matmul(self.J.T, self.K_inv))
         del SigmaInv
@@ -686,6 +688,7 @@ class Spectrum(object):
         self.toaerrs = psr.toaerrs
         self.phi = psr.phi
         self.theta = psr.theta
+        #self.N = psr.N 
         self.K_inv = psr.K_inv
         self.G = psr.G
         self.designmatrix = psr.designmatrix
@@ -1169,7 +1172,7 @@ def HellingsDownsCoeff(phi, theta, autocorr=False):
     """
 
     Npsrs = len(phi)
-    # Npairs = np.int(Npsrs * (Npsrs-1) / 2.)
+    #Npairs = np.int(Npsrs * (Npsrs-1) / 2.)
     psr_idx = np.arange(Npsrs)
     pairs = list(it.combinations(psr_idx,2))
     first, second = list(map(list, zip(*pairs)))

@@ -28,17 +28,23 @@ except FileExistsError:
     os.mkdir(path)
 #white noise covariance matrix profile file
 corr_matrix_mem = open(path + '/corr_matrix_mem.txt','w')
-#Default creation of characteristic strain profile file 
-sens_mem = open(path + '/sens_mem.txt','w')
-#Rank Reduced Formalism creation of characteristic strain profile file
-sens_mem_RRF= open(path + '/sens_mem_RRF.txt','w')
+#creation of hasasia pulsar
+hsen_psr_mem = open(path + '/psr_hsen_mem.txt','w')
+#Rank Reduced Formalism creation of hasasia pulsar
+hsen_psr_RRF_mem= open(path + '/psr_hsen_mem_RRF.txt','w')
+#
+hsen_psr_spec_mem = open(path + '/psr_hsen_spec_mem.txt','w')
+#Rank Reduced Formalism creation of hasasia pulsar
+hsen_psr_RRF_spec_mem= open(path + '/psr_hsen_spec_mem_RRF.txt','w')
+
+
 #Total time taken to generate each pulsar 
 time_increments = open(path + '/psr_increm.txt','w')
 #Default profile file to generate NcalInv (bottle neck for computation)
-hc_time_file = open(path + '/hc_time.txt','w')
+NcalInv_time_file = open(path + '/NcalInv_time.txt','w')
 #Rank Reduced Formalism file to generate NcalInv (bottle neck for computation)
-hc_RRF_time_file = open(path + '/hc_time_RRF.txt','w')
-Ncal_time_file = open(path + '/Ncal_meth_time.txt','w')
+NcalInv_RRF_time_file = open(path + '/NcalInv_time_RRF.txt','w')
+Null_time_file = open(path + '/Null_time.txt','w')
 
 
 
@@ -63,7 +69,20 @@ class PseudoPulsar:
         self.theta = theta
         self.toas = toas
         self.toaerrs = toaerrs
-        self.pdis = pdist
+        self.pdist = pdist
+
+class PseudoSpectraPulsar:
+    """Quick class to store data from HDF5 in prep for hasasia spectrum pulsar creation"""
+    def __init__(self, toas, toaerrs, phi, theta, pdist, K_inv, G, designmatrix):
+        self.K_inv = K_inv
+        self.G = G
+        self.phi = phi
+        self.theta = theta
+        self.toas = toas
+        self.toaerrs = toaerrs
+        self.pdist = pdist
+        self.designmatrix = designmatrix
+
 
 
 def get_psrname(file,name_sep='_'):
@@ -149,11 +168,239 @@ def white_corr(epsrs):
 
 
 
+def enterprise_entry():
+    """Creates Enterprise Pulsars, finds the total timespan, their names, then writes it all to HDF5 file
+    """
+    ePsrs = pulsar_class(pars, tims)
+    Tspan = hsen.get_Tspan(ePsrs)
+    
+    #weird format HDF5 for list of strings
+    name_list = np.array(['X' for _ in range(kill_count)], dtype=h5py.string_dtype(encoding='utf-8'))
+    #computes all white noise covariance matrices for all the pulsars, a list of matrices
+    wn_corrs = white_corr(ePsrs)
+    #adds each white noise covariance matrix as an attribute
+    for i in range(len(ePsrs)):
+        ePsrs[i].N = wn_corrs[i]
+    
+    del wn_corrs
+
+    with h5py.File(r'/home/gourliek/11_yr_enterprise_pulsars.hdf5', 'w') as f:
+        Tspan_h5 = f.create_dataset('Tspan', (1,), float)
+        Tspan_h5[:] = Tspan
+        
+        for i in range(len(ePsrs)): 
+            hdf5_psr = f.create_group(ePsrs[i].name)
+            hdf5_psr.create_dataset('toas', ePsrs[i].toas.shape, ePsrs[i].toas.dtype, data=ePsrs[i].toas)
+            hdf5_psr.create_dataset('toaerrs', ePsrs[i].toaerrs.shape,ePsrs[i].toaerrs.dtype, data=ePsrs[i].toaerrs)
+            hdf5_psr.create_dataset('phi', (1,), float, data=ePsrs[i].phi)
+            hdf5_psr.create_dataset('theta', (1,), float, data=ePsrs[i].theta)
+            hdf5_psr.create_dataset('designmatrix', ePsrs[i].Mmat.shape, ePsrs[i].Mmat.dtype, data=ePsrs[i].Mmat)
+            hdf5_psr.create_dataset('N', ePsrs[i].N.shape, ePsrs[i].N.dtype, data=ePsrs[i].N)
+            hdf5_psr.create_dataset('pdist', (2,), float, data=ePsrs[i].pdist)
+            name_list[i] = ePsrs[i].name
+            f.flush()
+            
+        f.create_dataset('names',data =name_list)
+        del ePsrs[:]
+        f.flush()
+        gc.collect()
+
+
+
+def hsen_pulsar_entry(psr, type__):
+    """Writes Hasasia Pulsar attributes to an HDF5 file
+
+    Args:
+    - psr (Hasasia Pulsar): Hasasia Pulsar object
+    - type__ (str): 'og' XOR 'rrf'
+    """
+    if type__ == 'og':
+        path = r'/home/gourliek/11_yr_pulsars_og.hdf5'
+
+    elif type__ == 'rrf':
+        path = r'/home/gourliek/11_yr_pulsars_rrf.hdf5'
+        
+    with h5py.File(path, 'a') as f:
+        hdf5_psr = f.create_group(psr.name)
+        hdf5_psr.create_dataset('toas', psr.toas.shape, psr.toas.dtype, data=psr.toas)
+        hdf5_psr.create_dataset('toaerrs', psr.toaerrs.shape,psr.toaerrs.dtype, data=psr.toaerrs)
+        hdf5_psr.create_dataset('phi', (1,), float, data=psr.phi)
+        hdf5_psr.create_dataset('theta', (1,), float, data=psr.theta)
+        hdf5_psr.create_dataset('designmatrix', psr.designmatrix.shape, psr.designmatrix.dtype, data=psr.designmatrix)
+        hdf5_psr.create_dataset('G', psr.G.shape, psr.G.dtype, data=psr.G)
+        hdf5_psr.create_dataset('K_inv', psr.K_inv.shape, psr.K_inv.dtype, data=psr.K_inv)
+        hdf5_psr.create_dataset('pdist', (2,), float, data=psr.pdist)
+        f.flush()
+
+
+
+@profile(stream=hsen_psr_mem)
+def hsen_creation(ePsr, freqs):
+    """creation of hasasia pulsar, then saves result into HDF5 file.
+    Note that this uses a noise covariance matrix with both red noise and white noise contributions for self.N
+
+    Args:
+        ePsr (PseudoPulsar): PseudoPulsar which is read from HDF5 file that save Enterprise.Pulsar attributes
+        freqs (numpy.array): frequencies
+    """
+    #benchmark stuff
+    
+    corr_from_psd_mem.write(f'Pulsar: {ePsr.name}\n')
+    #start_time = time.time()
+    #building red noise powerlaw using standard amplitude and gamma
+    plaw = hsen.red_noise_powerlaw(A=9e-16, gamma=13/3., freqs=freqs)
+
+    #if red noise parameters for an individual pulsar is present, add it to standard red noise
+    if ePsr.name in rn_psrs.keys():
+        Amp, gam = rn_psrs[ePsr.name]
+        plaw += hsen.red_noise_powerlaw(A=Amp, gamma=gam, freqs=freqs)  #was +=
+
+    #adding red noise components to the noise covariance matrix via power spectral density
+    ePsr.N += hsen.corr_from_psd(freqs=freqs, psd=plaw,
+                                toas=ePsr.toas[::thin])   
+    
+    #creating hasasia pulsar tobject 
+    psr = hsen.Pulsar(toas=ePsr.toas[::thin],
+                        toaerrs=ePsr.toaerrs[::thin],
+                        phi=ePsr.phi,theta=ePsr.theta, 
+                        N=ePsr.N, designmatrix=ePsr.Mmat[::thin,:], pdist=ePsr.pdist)
+   
+    #setting name of hasasia pulsar
+    psr.name = ePsr.name
+    _ = psr.K_inv
+    hsen_pulsar_entry(psr, 'og')
+
+    #enterprise pulsar is no longer needed
+    del ePsr
+    print(f"Hasasia Pulsar {psr.name} created\n")
+
+
+@profile(stream=hsen_psr_RRF_mem)
+def hsen_creation_rrf(ePsr):
+    """creation of hasasia pulsar, then saves result into HDF5 file. 
+    Note that RRF uses only a white noise covariance matrix for self.N
+
+    Args:
+        ePsr (PseudoPulsar): PseudoPulsar which is read from HDF5 file that save Enterprise.Pulsar attributes
+        freqs (numpy.array): frequencies
+    """
+    #benchmark stuff
+    #creating hasasia pulsar tobject 
+    psr = hsen.Pulsar(toas=ePsr.toas[::thin],
+                        toaerrs=ePsr.toaerrs[::thin],
+                        phi=ePsr.phi,theta=ePsr.theta, 
+                        N=ePsr.N, designmatrix=ePsr.Mmat[::thin,:], pdist=ePsr.pdist)
+    
+    #setting name of hasasia pulsar
+    psr.name = ePsr.name
+    _ = psr.K_inv
+    hsen_pulsar_entry(psr, 'rrf') 
+
+    #enterprise pulsar is no longer needed
+    del ePsr
+    print(f"Hasasia RRF Pulsar {psr.name} created\n")
+
+
+@profile(stream=hsen_psr_spec_mem)
+def hsen_spectra_creation(freqs, names)->list:
+    """Creation of hasasia spectrum pulsars 
+
+    Args:
+        - freqs (numpy.array): frequencies
+        - names (list): list containing all names of pulsars
+
+    Returns:
+        - spectras (list): list of Hasasia Spectrum Pulsars
+    """
+    start_time = time.time()
+    spectras = []
+    path = r'/home/gourliek/11_yr_pulsars_og.hdf5'
+    with h5py.File(path, 'r') as f:
+        for name in names:
+            psr = f[name]
+            pseudo = PseudoSpectraPulsar(toas=psr['toas'][:], toaerrs=psr['toaerrs'][:], phi = psr['phi'][:][0],
+                                    theta = psr['theta'][:][0], K_inv=psr['K_inv'][:], G=psr['G'][:], pdist=psr['pdist'][:],
+                                    designmatrix=psr['designmatrix'])
+            pseudo.name = name
+
+            spec_psr = hsen.Spectrum(pseudo, freqs=freqs)
+            spec_psr.name = pseudo.name
+
+            del pseudo
+            ########################################
+            #quantity is called up so it is computed
+            get_NcalInv_mem.write(f'Pulsar: {name}\n')
+            NcalInv_time_start = time.time()
+            _ = spec_psr.NcalInv
+            NcalInv_time_end = time.time()
+            ########################################
+            end_time = time.time()
+            NcalInv_time_file.write(f"{name}\t{NcalInv_time_end-NcalInv_time_start}\n")
+            time_increments.write(f"{name} {start_time-null_time} {end_time-null_time}\n")
+            spectras.append(spec_psr)
+    return spectras
+
+    
+@profile(stream=hsen_psr_RRF_spec_mem)
+def hsen_spectra_creation_rrf(freqs, names)->list:
+    """Creation of hasasia spectrum pulsars using RRF
+
+    Args:
+        - freqs (numpy.array): frequencies
+        - names (list): list containing all names of pulsars
+
+    Returns:
+        - spectras (list): list of Hasasia Spectrum Pulsars
+    """
+    start_time = time.time()
+    path = r'/home/gourliek/11_yr_pulsars_rrf.hdf5'
+    spectras = []
+    with h5py.File(path, 'r') as f:
+        for name in names:
+            psr = f[name]
+            pseudo = PseudoSpectraPulsar(toas=psr['toas'][:], toaerrs=psr['toaerrs'][:], phi = psr['phi'][:][0],
+                                    theta = psr['theta'][:][0], pdist=psr['pdist'][:], K_inv=psr['K_inv'][:], G=psr['G'][:],
+                                    designmatrix=psr['designmatrix'])
+            pseudo.name = name
+            
+            if pseudo.name in rn_psrs.keys():
+                Amp, gam = rn_psrs[pseudo.name]
+                #creates spectrum hasasia pulsar to calculate characteristic straing
+                spec_psr = hsen.RRF_Spectrum(pseudo, amp = Amp, gamma = gam, freqs=freqs)
+                spec_psr.name = pseudo.name
+            
+            else:
+                #creates spectrum hasasia pulsar to calculate characteristic straing
+                spec_psr = hsen.RRF_Spectrum(pseudo, freqs=freqs)
+                spec_psr.name = pseudo.name
+            
+            #hasasia pulsar no longer needed
+            del pseudo
+            ########################################
+            #quantity is called up so it is computed
+            get_NcalInv_RFF_mem.write(f'Pulsar: {name}\n')
+            NcalInv_time_start = time.time()
+            _ = spec_psr.NcalInv
+            NcalInv_time_end = time.time()
+            end_time = time.time()
+            ########################################
+            NcalInv_RRF_time_file.write(f"RRF{name}\t{NcalInv_time_end-NcalInv_time_start}\n")
+            time_increments.write(f" RRF{name} {start_time-null_time} {end_time-null_time}\n")
+            spectras.append(spec_psr)
+    return spectras
+
+
+
+
+
+
+
+"""
 @profile(stream=sens_mem_RRF)
 def rrf_array_construction(ePsr, freqs):
     
     #benchmark stuff
-    get_NcalInv_RFF_mem.write(f'Pulsar: {ePsr.name}\n')
+    
     hc_time_start = time.time()
     start_time = time.time()
         
@@ -166,8 +413,7 @@ def rrf_array_construction(ePsr, freqs):
     
     #setting name of hasasia pulsar
     psr.name = ePsr.name
-    #calling this first so it doesn't have to be computed during h_c callup
-    _ = psr.K_inv
+    #hsen_pulsar_entry(psr, 'og')    _
     #extra variable needed for benchmarking
 
     #enterprise pulsar is no longer needed
@@ -191,12 +437,8 @@ def rrf_array_construction(ePsr, freqs):
     #hasasia pulsar no longer needed
     del psr
 
-    #grabbing wanted data
-    h_c = spec_psr.h_c
-
     hc_time_end = time.time()
     name = spec_psr.name
-    del spec_psr
    
     hc_RRF_time_file.write(f"RRF{name}\t{hc_time_end-hc_time_start}\n")
 
@@ -207,7 +449,7 @@ def rrf_array_construction(ePsr, freqs):
     time_increments.write(f" RRF{name} {start_time-null_time} {end_time-null_time}\n")
     print('\rPSR RRF {0} complete\n'.format(name),end='',flush=True)
     
-    return h_c
+    return spec_psr
 
 
 
@@ -238,6 +480,7 @@ def array_construction(ePsr, freqs):
     
     #setting name of hasasia pulsar
     psr.name = ePsr.name
+    #hsen_pulsar_entry(psr, 'og')
 
     #enterprise pulsar is no longer needed
     del ePsr
@@ -250,15 +493,12 @@ def array_construction(ePsr, freqs):
 
     #hasasia pulsar no longer needed
     del psr
-
-    #grabbing data that I want from each pulsar
-    h_c = spec_psr.h_c
+    _ = spec_psr.NcalInv
    
     time_hc_end = time.time()
     hc_time_file.write(f"{spec_psr.name}\t{time_hc_end - time_hc_start}\n")
 
     name = spec_psr.name
-    del spec_psr
 
     print(f"Hasasia Spectrum Pulsar {name} created\n")
 
@@ -267,8 +507,8 @@ def array_construction(ePsr, freqs):
     time_increments.write(f"{name} {start_time-null_time} {end_time-null_time}\n")
     print('\rPSR {0} complete\n'.format(name),end='',flush=True)
 
-    return h_c
-        
+    return spec_psr
+"""      
 
 
 
@@ -417,59 +657,25 @@ def yr_12_data():
 
     return par_files, tim_files, noise, psr_name_list, red_noise, white_noise
 
-
-def pulsar_entry():
-    ePsrs = pulsar_class(pars, tims)
-    Tspan = hsen.get_Tspan(ePsrs)
-
-    #weird format HDF5 for list of strings
-    name_list = np.array(['X' for _ in range(kill_count)], dtype=h5py.string_dtype(encoding='utf-8'))
-    #computes all white noise covariance matrices for all the pulsars, a list of matrices
-    wn_corrs = white_corr(ePsrs)
-    #adds each white noise covariance matrix as an attribute
-    for i in range(len(ePsrs)):
-        ePsrs[i].N = wn_corrs[i]
+def hasasia_write():
+    """Functiont that writes hasasia pulsars to HDF5. Comment this out if HDF5 files already created"""
+    for name in names_list:
+        psr = f[name]
     
-    del wn_corrs
+        pseudo = PseudoPulsar(toas=psr['toas'][:], toaerrs=psr['toaerrs'][:], phi = psr['phi'][:][0],
+                                theta = psr['theta'][:][0], pdist=psr['pdist'][:], N=psr['N'][:])
+        pseudo.name = name
+        pseudo.Mmat= psr['designmatrix'][:]
 
-    with h5py.File(r'/home/gourliek/11_yr_enterprise_pulsars.hdf5', 'w') as f:
-        Tspan_h5 = f.create_dataset('Tspan', (1,), float)
-        Tspan_h5[:] = Tspan
+        #converts each pseduo into hasasia pulsar, then writes it to disk
         
-        for i in range(len(ePsrs)): 
-            hdf5_psr = f.create_group(ePsrs[i].name)
-            toas = hdf5_psr.create_dataset('toas', ePsrs[i].toas.shape, ePsrs[i].toas.dtype, data=ePsrs[i].toas)
-            toaerrs = hdf5_psr.create_dataset('toaerrs', ePsrs[i].toaerrs.shape,ePsrs[i].toaerrs.dtype, data=ePsrs[i].toaerrs)
-            phi = hdf5_psr.create_dataset('phi', (1,), float, data=ePsrs[i].phi)
-            theta = hdf5_psr.create_dataset('theta', (1,), float, data=ePsrs[i].theta)
-            designmatrix = hdf5_psr.create_dataset('designmatrix', ePsrs[i].Mmat.shape, ePsrs[i].Mmat.dtype, data=ePsrs[i].Mmat)
-            WN = hdf5_psr.create_dataset('N', ePsrs[i].N.shape, ePsrs[i].N.dtype, data=ePsrs[i].N)
-            pdist = hdf5_psr.create_dataset('pdist', (2,), float, data=ePsrs[i].pdist)
-            name_list[i] = ePsrs[i].name
-            f.flush()
-            
-        f.create_dataset('names',data =name_list)
-        del ePsrs[:]
-        f.flush()
-        gc.collect()
-
-def spectra_entry(psr, type__):
-    if type__ == 'og':
-        path = r'/home/gourliek/11_yr_spectra_pulsars_og.hdf5'
-
-    elif type__ == 'rrf':
-        path = r'/home/gourliek/11_yr_spectra_pulsars_rrf.hdf5'
+        hsen_psr_mem.write(f'Pulsar: {name}\n')
+        hsen_psr_RRF_mem.write(f'Pulsar: {name}\n')
         
-    with h5py.File(path, 'w') as f:
-        hdf5_psr = f.create_group(psr.name)
-        toas = hdf5_psr.create_dataset('toas', psr.toas.shape, psr.toas.dtype, data=psr.toas)
-        toaerrs = hdf5_psr.create_dataset('toaerrs', psr.toaerrs.shape,psr.toaerrs.dtype, data=psr.toaerrs)
-        phi = hdf5_psr.create_dataset('phi', (1,), float, data=psr.phi)
-        theta = hdf5_psr.create_dataset('theta', (1,), float, data=psr.theta)
-        designmatrix = hdf5_psr.create_dataset('designmatrix', psr.designmatrix.shape, psr.designmatrix.dtype, data=psr.designmatrix)
-        G = hdf5_psr.create_dataset('G', psr.G.shape, psr.G.dtype, data=psr.G)
-        K_inv = hdf5_psr.create_dataset('K_inv', psr.K_inv.shape, psr.K_inv.dtype, data=psr.K_inv)
-        f.flush()
+        hsen_creation(pseudo, freqs)
+        hsen_creation_rrf(pseudo)
+        del pseudo
+
 
 
   
@@ -479,28 +685,26 @@ def spectra_entry(psr, type__):
 ################################################################################################################
 if __name__ == '__main__':
     null_time = time.time()
-    Ncal_time_file.write(f'{null_time}\n')
-    kill_count = 34  #max is 34 for 11yr dataset
+    Null_time_file.write(f'{null_time}\n')
+    ###################################################
+    kill_count =  34 #max is 34 for 11yr dataset
     thin = 1
-
+    ###################################################
     #lists for plotting sensitivity curves
-    h_c_list = []
-    h_c_list_r = []
-    freqs_list = []
+    spectra_list = []
+    spectra_list_r = []
     names_list = [] 
     fyr = 1/(365.25*24*3600)
  
     #read time data for profiling
     with cProfile.Profile() as pr:
         psr_list, pars, tims, noise, rn_psrs = yr_11_data()
+        ##################################################
         #IF you need to re-create enterprise pulsars
-        #pulsar_entry()
+        #enterprise_entry()
         #exit()
+        ##################################################
         
-        #To access data in hdf5, need names of pulsars first
-        #Some other data also like Tspan as well
-        
-   
         with h5py.File(r'/home/gourliek/11_yr_enterprise_pulsars.hdf5', 'r') as f:
             #memory map to hdf5 file
             Tspan_pt = f['Tspan']
@@ -517,50 +721,50 @@ if __name__ == '__main__':
                 names_list.append(names[i].decode('utf-8'))
 
             #this will loop through every pulsar created from HDF5 file
-            for name in names_list:
-                psr = f[name]
+            #hasasia_write()
+            spectra_list_r = hsen_spectra_creation_rrf(freqs, names_list)
+            ng11yr_rrf_sc = hsen.GWBSensitivityCurve(spectra_list_r)
+            ng11yr_rrf_dsc = hsen.DeterSensitivityCurve(spectra_list_r)
+            rrf_sc_hc = ng11yr_rrf_sc.h_c
+            rrf_sc_freqs = ng11yr_rrf_sc.freqs
+            rrf_dsc_hc = ng11yr_rrf_dsc.h_c
+            rrf_dsc_freqs = ng11yr_rrf_dsc.freqs
+            del ng11yr_rrf_sc, ng11yr_rrf_dsc, spectra_list_r
 
-                pseudo = PseudoPulsar(toas=psr['toas'][:], toaerrs=psr['toaerrs'][:], phi = psr['phi'][:],
-                                      theta = psr['theta'][:], pdist=psr['pdist'][:], N=psr['N'][:])
-                pseudo.name = name
-                pseudo.Mmat= psr['designmatrix'][:]
+            spectra_list = hsen_spectra_creation(freqs, names_list)
+            ng11yr_sc = hsen.GWBSensitivityCurve(spectra_list)
+            ng11yr_dsc = hsen.DeterSensitivityCurve(spectra_list)
+            sc_hc = ng11yr_sc.h_c
+            sc_freqs = ng11yr_sc.freqs
+            dsc_hc = ng11yr_dsc.h_c
+            dsc_freqs = ng11yr_dsc.freqs
+            del ng11yr_sc, ng11yr_dsc, spectra_list
+                
 
-                #getting characteristic strains from origonal and rrf method:
-                h_c= array_construction(pseudo, freqs)
-                h_c_rrf = rrf_array_construction(pseudo, freqs)
+       
 
-                h_c_list.append(h_c)
-                h_c_list_r.append(h_c_rrf)
-                freqs_list.append(freqs)
-                del pseudo
-
-            
+        
     #saving time profile data collected on entire run
     with open(path + '/test_time.txt', "w") as file:
         stats = pstats.Stats(pr, stream=file)
         stats.sort_stats(pstats.SortKey.CUMULATIVE)
         stats.print_stats()
+     
 
-    for i in range(len(names_list)):
-        plt.loglog(freqs_list[i],h_c_list_r[i],lw=2,label=f'{names_list[i]} rrf')
-    plt.rc('text', usetex=True)
-    plt.xlabel('Frequency [Hz]')
-    plt.ylabel('Characteristic Strain vs Frequency, $h_c$')
-    plt.legend(loc='upper left')
-    plt.title('Characteristic Strain RRF')
-    plt.savefig(path+'/h_c_RRF.png')
-    plt.close()
+        plt.loglog(sc_freqs,sc_hc, label='Norm Stoch')
+        plt.loglog(dsc_freqs,dsc_hc, label='Norm Det')
+        plt.loglog(rrf_sc_freqs,rrf_sc_hc, label='RRF Stoch')
+        plt.loglog(rrf_dsc_freqs,rrf_dsc_hc, label='RRF Det')
+        plt.ylabel('Characteristic Strain, $h_c$')
+        plt.title('NANOGrav 11-year Data Set Sensitivity Curve')
+        plt.grid(which='both')
+        plt.legend()
+        plt.savefig(path+'/GWB_h_c.png')
+        plt.close()
 
 
-    for i in range(len(names_list)):
-        plt.loglog(freqs_list[i],h_c_list[i],lw=2,label=names_list[i])
-    plt.rc('text', usetex=True)
-    plt.xlabel('Frequency [Hz]')
-    plt.ylabel('Characteristic Strain, $h_c$')
-    plt.legend(loc='upper left')
-    plt.title('Characteristic Strain vs Frequency')
-    plt.savefig(path+'/h_c.png')
-    plt.close()
+  
+    
 
 
 

@@ -87,7 +87,7 @@ if __name__ == '__main__':
     OG = []
     OG_jax = []
     OG_mod = []
-    with open(psrs_name_path + '/Ncal_meth_time.txt', 'r') as file:
+    with open(psrs_name_path + '/Null_time.txt', 'r') as file:
         for line in file:
             line = line.strip('\n')
             data.append(line)
