@@ -3,7 +3,7 @@ from __future__ import print_function
 """Main module."""
 import numpy  as np
 from functools import cached_property
-import jax
+import jax, dask
 import jax.numpy as jnp
 import jax.scipy as jsc
 import itertools as it
@@ -34,7 +34,6 @@ get_K_inv_mem = open(path + '/get_K_inv_mem.txt','w')
 get_J_mem = open(path + '/get_J_mem.txt','w')
 #memory profile for computation of correlation matrix for the Red Noise, which is needed for default
 corr_from_psd_mem = open(path + '/corr_from_psd_mem.txt','w')
-#Ncal_time_file = open(path + '/Ncal_meth_time.txt','a')
 
 
 
@@ -209,22 +208,6 @@ def get_Tf(designmatrix, toas, N=None, nf=200, fmin=None, fmax=2e-7,
     return np.real(Tmat), ff, T
 
 
-
-@profile(stream=get_J_mem)
-def get_J(psr):
-    """
-    psr: hasasia spectrum pulsar
-    """
-    get_J_mem.write(f"{psr.name}\n")
-    T = psr.toas.max()-psr.toas.min()
-    nf = len(psr.freqs)
-
-    F, f = createfourierdesignmatrix_red(toas=psr.toas,nmodes=nf, Tspan=T)
-    del f   
-
-    J = psr.G.T @ F
-    return J
-
 @profile(stream=get_NcalInv_mem)
 def get_NcalInv(psr, nf=200, fmin=None, fmax=2e-7, freqs=None,
                 exact_yr_freqs = False, full_matrix=False,
@@ -385,8 +368,8 @@ class Pulsar(object):
             self._G = G_matrix(designmatrix=self.designmatrix)
         return self._G
     
-    @cached_property
-    @profile(stream = get_K_inv_mem) 
+    @cached_property 
+    @profile(stream = get_K_inv_mem)
     def K_inv(self):
         get_K_inv_mem.write(f"{self.name}\n")
         """
@@ -398,9 +381,7 @@ class Pulsar(object):
         del L
         K = jnp.matmul(A.T,A)
         del A
-        self._K_inv = np.linalg.inv(K)
-        del K
-        return self._K_inv
+        return np.linalg.inv(K)
 
 #KG rrf changes
 class RRF_Spectrum(object):
@@ -462,14 +443,6 @@ class RRF_Spectrum(object):
             self.freqs = freqs
 
         self._psd_prefit = np.zeros_like(self.freqs)
-
-    @property
-    def J(self):
-        if not hasattr(self, '_J'):
-            self._J = get_J(self)
-        return self._J
-
-    @property
     def psd_postfit(self):
         """Postfit Residual Power Spectral Density"""
         if not hasattr(self, '_psd_postfit'):
@@ -498,10 +471,20 @@ class RRF_Spectrum(object):
                                   **self.Tf_kwargs)
         return self._Tf
     
-    @property
+    @cached_property
     @profile(stream = get_NcalInv_RFF_mem)
     def NcalInv(self, full_matrix=False, return_Gtilde_Ncal=False):
+        """_summary_
+
+        Args:
+            full_matrix (bool, optional): _description_. Defaults to False.
+            return_Gtilde_Ncal (bool, optional): _description_. Defaults to False.
+
+        Returns:
+            _type_: _description_
+        """
         nf = len(self.freqs)
+        T = self.toas.max()-self.toas.min()
         #for pulsars with no red noise power
         if self.gamma == None or self.amp == None:
             C_rn_inv = np.zeros((2*nf, 2*nf))
@@ -512,17 +495,19 @@ class RRF_Spectrum(object):
             C_rn_inv[::2, ::2] = np.diag(1/C_rn_proto)   #odd elements
             C_rn_inv[1::2, 1::2] = np.diag(1/C_rn_proto) #even elements
             del C_rn_proto
+
+        
+       
+        #Fourier Design matrix
+        F, f = createfourierdesignmatrix_red(toas=self.toas,nmodes=nf, Tspan=T)
+        del f   
+        J = jnp.matmul(self.G.T, F)
+        del F
             
-        #cholesky decomposition speed up for symmetric matrix multiplication
-        #L = sl.cholesky(self.K_inv)
-        #A = jnp.matmul(L, self.J)
-        #del L
-        #Sigma = jnp.matmul(A.T, A) + C_rn_inv 
-        #del A
-        Sigma = jnp.matmul(self.J.T, jnp.matmul(self.K_inv, self.J))
+        Sigma = jnp.matmul(J.T, jnp.matmul(self.K_inv, J))
         SigmaInv = np.linalg.inv(Sigma)
-        Z = jnp.matmul(SigmaInv, jnp.matmul(self.J.T, self.K_inv))
-        del SigmaInv
+        Z = jnp.matmul(SigmaInv, jnp.matmul(J.T, self.K_inv))
+        del SigmaInv, J
 
         Gtilde = np.zeros((self.freqs.size,self.G.shape[1]),dtype='complex128')
         Gtilde = jnp.dot(np.exp(1j*2*np.pi*self.freqs[:,np.newaxis]*self.toas),self.G)
