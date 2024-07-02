@@ -504,7 +504,7 @@ class RRF_Spectrum(object):
         J = jnp.matmul(self.G.T, F)
         del F
             
-        Sigma = jnp.matmul(J.T, jnp.matmul(self.K_inv, J))
+        Sigma = jnp.matmul(J.T, jnp.matmul(self.K_inv, J)) + C_rn_inv
         SigmaInv = np.linalg.inv(Sigma)
         Z = jnp.matmul(SigmaInv, jnp.matmul(J.T, self.K_inv))
         del SigmaInv, J
