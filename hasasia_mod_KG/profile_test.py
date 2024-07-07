@@ -337,7 +337,7 @@ def hsen_spectra_creation(freqs, names)->list:
             ########################################
             end_time = time.time()
             NcalInv_time_file.write(f"{name}\t{NcalInv_time_end-NcalInv_time_start}\n")
-            time_increments.write(f"OG {name} {start_time+null_time} {end_time+null_time}\n")
+            time_increments.write(f"OG {name} {start_time-null_time} {end_time-null_time}\n")
             spectras.append(spec_psr)
     return spectras
 
@@ -387,7 +387,7 @@ def hsen_spectra_creation_rrf(freqs, names)->list:
             end_time = time.time()
             ########################################
             NcalInv_RRF_time_file.write(f"RRF{name}\t{NcalInv_time_end-NcalInv_time_start}\n")
-            time_increments.write(f"RRF {name} {start_time+null_time} {end_time+null_time}\n")
+            time_increments.write(f"RRF {name} {start_time-null_time} {end_time-null_time}\n")
             spectras.append(spec_psr)
     return spectras
 
