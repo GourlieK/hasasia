@@ -325,6 +325,7 @@ def hsen_spectra_creation(freqs, names)->list:
 
             spec_psr = hsen.Spectrum(pseudo, freqs=freqs)
             spec_psr.name = pseudo.name
+            print(f'Hasasia Spectrum {spec_psr.name} created\n')
 
             del pseudo
             ########################################
@@ -336,7 +337,7 @@ def hsen_spectra_creation(freqs, names)->list:
             ########################################
             end_time = time.time()
             NcalInv_time_file.write(f"{name}\t{NcalInv_time_end-NcalInv_time_start}\n")
-            time_increments.write(f"{name} {start_time-null_time} {end_time-null_time}\n")
+            time_increments.write(f"OG {name} {start_time+null_time} {end_time+null_time}\n")
             spectras.append(spec_psr)
     return spectras
 
@@ -373,7 +374,8 @@ def hsen_spectra_creation_rrf(freqs, names)->list:
                 #creates spectrum hasasia pulsar to calculate characteristic straing
                 spec_psr = hsen.RRF_Spectrum(pseudo, freqs=freqs)
                 spec_psr.name = pseudo.name
-            
+
+            print(f'Hasasia Spectrum RRF {spec_psr.name} created\n')
             #hasasia pulsar no longer needed
             del pseudo
             ########################################
@@ -385,7 +387,7 @@ def hsen_spectra_creation_rrf(freqs, names)->list:
             end_time = time.time()
             ########################################
             NcalInv_RRF_time_file.write(f"RRF{name}\t{NcalInv_time_end-NcalInv_time_start}\n")
-            time_increments.write(f" RRF{name} {start_time-null_time} {end_time-null_time}\n")
+            time_increments.write(f"RRF {name} {start_time+null_time} {end_time+null_time}\n")
             spectras.append(spec_psr)
     return spectras
 
@@ -658,7 +660,7 @@ def yr_12_data():
     return par_files, tim_files, noise, psr_name_list, red_noise, white_noise
 
 def hasasia_write():
-    """Functiont that writes hasasia pulsars to HDF5. Comment this out if HDF5 files already created"""
+    """Function that writes hasasia pulsars to HDF5. Comment this out if HDF5 files already created"""
     for name in names_list:
         psr = f[name]
     
@@ -761,6 +763,7 @@ if __name__ == '__main__':
         plt.legend()
         plt.savefig(path+'/GWB_h_c.png')
         plt.close()
+        print(sc_hc/rrf_sc_hc)
 
 
   

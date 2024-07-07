@@ -72,7 +72,7 @@ if __name__ == '__main__':
     mem_data = []
 
     #if data is already saved to folder, comment save_data() out and it will just analyze the data
-    save_data()
+    #save_data()
 
     #grabbing time increments from execution of hasasia_spectrum()
     with open(psrs_name_path + '/psr_increm.txt', 'r') as file:
@@ -81,43 +81,17 @@ if __name__ == '__main__':
             line = line.split()
             increms.append(line)
 
-
-
+    #grabbing initial time stamp
     data = []
-    OG = []
-    OG_jax = []
-    OG_mod = []
     with open(psrs_name_path + '/Null_time.txt', 'r') as file:
         for line in file:
             line = line.strip('\n')
             data.append(line)
 
     null_time = float(data[0])
-    del data[0]
+    del data
 
-    for line in data:
-        line = line.split(':')
-        if str(line[0]) == 'Origonal':
-            num = line[1]
-            nums = num.split(',')
-            new_0 = nums[0].replace("(", "")
-            new_1 = nums[1].replace(")", "")
-            OG.append([float(new_0),float(new_1)])
-
-        if str(line[0]) == 'Origonal Jax':
-            num = line[1]
-            nums = num.split(',')
-            new_0 = nums[0].replace("(", "")
-            new_1 = nums[1].replace(")", "")
-            OG_jax.append([float(new_0),float(new_1)])
-
-        if str(line[0]) == 'Modified':
-            num = line[1]
-            nums = num.split(',')
-            new_0 = nums[0].replace("(", "")
-            new_1 = nums[1].replace(")", "")
-            OG_mod.append([float(new_0),float(new_1)]) 
-                  
+                
     #opening the recently saved data text file
     with open(psrs_name_path + '/time_mem_data.txt', 'r') as file:
         for line in file:
@@ -149,16 +123,19 @@ if __name__ == '__main__':
     plt.savefig(psrs_name_path+'/mem_time.png') 
     plt.show()
 
+
+    psr_plts = []
     #grabbing increment data 
     for i in range(len(increms)):
-        name = increms[i][0]
-        val_1 = float(increms[i][1])
-        val_2 = float(increms[i][2])
+        name = increms[i][0] + increms[i][1]
+        val_1 = float(increms[i][2])
+        val_2 = float(increms[i][3])
         index = np.where((time_data >= val_1) & (time_data <= val_2))
         x_vals = time_data[index]
         y_vals = mem_data[index]
-        plt.plot(x_vals, y_vals, c = color[i], label = name)
-
+        #psr_plts.append([name, x_vals, y_vals])
+        plt.plot(x_vals, y_vals, label = name)
+  
     #plots each pulsar data
     plt.title(f"Memory vs Time of {len(increms)} Pulsars from hasasia_spectrum")
     plt.xlabel('time [s]')
