@@ -2,9 +2,9 @@
 from __future__ import print_function
 """Main module."""
 import numpy  as np
+import hasasia, jax
 from functools import cached_property
-from jax.config import config
-config.update("jax_enable_x64", True)
+jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import jax.scipy as jsc
 import itertools as it
@@ -14,7 +14,8 @@ import os, pickle, functools
 from astropy import units as u
 from enterprise.signals.gp_bases import createfourierdesignmatrix_red
 
-import hasasia
+from functools import partial
+import equinox as eqx
 
 
 
@@ -328,8 +329,8 @@ class RRF_Spectrum(object):
         Optionally supply an array of frequencies over which to build the
         various spectral densities.
     """
-    def __init__(self, psr, amp = None, gamma = None, nf=400, fmin=None, fmax=2e-7,
-                 freqs=None, tm_fit=True, **Tf_kwargs):
+    def __init__(self, psr, freqs_gw, amp = None, gamma = None, nf=400, fmin=None,
+                  fmax=2e-7, freqs=None,  tm_fit=True, **Tf_kwargs):
         self._H_0 = 72 * u.km / u.s / u.Mpc
         self.toas = psr.toas
         self.toaerrs = psr.toaerrs
@@ -350,6 +351,8 @@ class RRF_Spectrum(object):
 
         self.amp = amp
         self.gamma = gamma
+        self.freqs_gw = freqs_gw
+
         self.tm_fit = tm_fit
         self.Tf_kwargs = Tf_kwargs
         if freqs is None:
@@ -390,6 +393,43 @@ class RRF_Spectrum(object):
                                   **self.Tf_kwargs)
         return self._Tf
     
+
+    @cached_property
+    def CirnInv(self):
+        """Intrinsic Red Noise Covariance Matrix
+        """
+        nf = len(self.freqs)
+        #for pulsars with no red noise power
+        if self.gamma == None or self.amp == None:
+            C_rn_inv = np.zeros((2*nf, 2*nf))
+        else:
+            #creation of fourier coeffiecent covariance matrix, and computes inverse
+            C_rn_proto = self.add_red_noise_power(A=self.amp, gamma=self.gamma, vals=True)
+            C_rn_inv = np.zeros((2*nf, 2*nf))
+            C_rn_inv[::2, ::2] = np.diag(1/C_rn_proto)   #odd elements
+            C_rn_inv[1::2, 1::2] = np.diag(1/C_rn_proto) #even elements
+            del C_rn_proto
+        return C_rn_inv
+    
+    @cached_property
+    def CgwInv(self):
+        """Gravitational Wave Red Noise Covariance Matrix
+        """
+        nf = self.freqs.size
+        sub_f = np.zeros(nf)
+
+        # Create a mask for elements in f that are in f_gw
+        mask = np.isin(self.freqs, self.freqs_gw)
+        sub_f[mask] = self.freqs_gw
+
+        C_gwb_proto = self.add_red_noise_power(9e-16, gamma=13/3., vals=True, f_gw=sub_f)
+        C_gwb_inv = np.zeros((2*nf, 2*nf))
+        C_gwb_inv[::2, ::2] = np.diag(1/C_gwb_proto)   #odd elements
+        C_gwb_inv[1::2, 1::2] = np.diag(1/C_gwb_proto) #even elements
+        del C_gwb_proto
+        return C_gwb_inv
+
+    
     @cached_property
     @profile(stream = get_NcalInv_RFF_mem)
     def NcalInv(self, full_matrix=False, return_Gtilde_Ncal=False):
@@ -399,7 +439,7 @@ class RRF_Spectrum(object):
             full_matrix (bool, optional): _description_. Defaults to False.
             return_Gtilde_Ncal (bool, optional): _description_. Defaults to False.
 
-        Returns:
+        Returns:, 
             _type_: _description_
         """
         #Defining Ncal and NcalInv depending on existence of self.N or self.K_inv
@@ -417,24 +457,6 @@ class RRF_Spectrum(object):
         nf = len(self.freqs)
         T = self.toas.max()-self.toas.min()
         #for pulsars with no red noise power
-        if self.gamma == None or self.amp == None:
-            C_rn_inv = np.zeros((2*nf, 2*nf))
-        else:
-            #creation of fourier coeffiecent covariance matrix, and computes inverse
-            C_rn_proto = self.add_red_noise_power(A=self.amp, gamma=self.gamma, vals=True)
-            C_rn_inv = np.zeros((2*nf, 2*nf))
-            C_rn_inv[::2, ::2] = np.diag(1/C_rn_proto)   #odd elements
-            C_rn_inv[1::2, 1::2] = np.diag(1/C_rn_proto) #even elements
-            del C_rn_proto
-
-        C_gwb_proto = self.add_red_noise_power(9e-16, gamma=13/3., vals=True)
-        C_gwb_inv = np.zeros((2*nf, 2*nf))
-        C_gwb_inv[::2, ::2] = np.diag(1/C_gwb_proto)   #odd elements
-        C_gwb_inv[1::2, 1::2] = np.diag(1/C_gwb_proto) #even elements
-        del C_gwb_proto
-
-     
-
      
         #Fourier Design matrix
         F, f = createfourierdesignmatrix_red(toas=self.toas,nmodes=nf, Tspan=T)
@@ -443,26 +465,26 @@ class RRF_Spectrum(object):
         del F
             
         Z = jnp.matmul(J.T, K_inv)
-        Sigma = jnp.matmul(Z, J) + C_rn_inv + C_gwb_inv
-        SigmaInv = np.linalg.inv(Sigma)
+        Sigma = jnp.matmul(Z, J) + self.CirnInv + self.CgwInv
+        SigmaInv = jnp.linalg.inv(Sigma)
 
         del J, Sigma
         
         Gtilde = np.zeros((self.freqs.size,self.G.shape[1]),dtype='complex128')
         Gtilde = jnp.dot(np.exp(1j*2*np.pi*self.freqs[:,np.newaxis]*self.toas),self.G)
 
-        NcalInv = K_inv + jnp.matmul(Z.T, jnp.matmul(SigmaInv, Z))   
+        NcalInv = (K_inv + jnp.matmul(Z.T, jnp.matmul(SigmaInv, Z))) / 2#divide by 2 for some reason   
 
         del SigmaInv, Z, K_inv
-
-        TfN = jnp.matmul(np.conjugate(Gtilde),jnp.matmul(NcalInv,Gtilde.T)) / 2
+        #divided by 4, not 2 for some reason, possibly some normalization stuff
+        TfN = jnp.matmul(jnp.conjugate(Gtilde),jnp.matmul(NcalInv,Gtilde.T)) / 2
     
         if return_Gtilde_Ncal:
-            return np.real(TfN), Gtilde, np.linalg.inv(NcalInv)
+            return jnp.real(TfN), Gtilde, jnp.linalg.inv(NcalInv)
         elif full_matrix:
-            return np.real(TfN)
+            return jnp.real(TfN)
         else:
-            return np.real(np.diag(TfN)) / get_Tspan([self])
+            return jnp.real(jnp.diag(TfN)) / get_Tspan([self])
             
     @property
     def P_n(self):
@@ -544,7 +566,7 @@ class RRF_Spectrum(object):
         if vals:
             return white_noise
 
-    def add_red_noise_power(self, A=None, gamma=None, vals=False):
+    def add_red_noise_power(self, A=None, gamma=None, vals=False, f_gw=None):
         r"""
         Add power law red noise to the prefit residual power spectral density.
         As :math:`P=A^2(f/fyr)^{-\gamma}`.
@@ -565,7 +587,10 @@ class RRF_Spectrum(object):
             Whether to return the psd values as an array. Otherwise just added
             to `self.psd_prefit`.
         """
-        ff = self.freqs
+        if f_gw is None:
+            ff = self.freqs
+        else:
+            ff = f_gw
         red_noise = A**2*(ff/fyr)**(-gamma)/(12*np.pi**2) * yr_sec**3
         self._psd_prefit += red_noise
         if vals:

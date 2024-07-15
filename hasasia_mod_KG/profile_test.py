@@ -94,25 +94,7 @@ def get_psrname(file,name_sep='_'):
     return file.split('/')[-1].split(name_sep)[0]
 
 
-def pulsar_class(parameters, timons):
-    """Generates Enterprise Pulsar Objects based on .par and .tim files
 
-    Returns:
-        enterprise_Psrs: Enterprise Pulsar Object list
-    """
-    enterprise_Psrs = []
-    count = 1
-    
-    for par,tim in zip(parameters,timons):
-        if count <= kill_count:
-            ePsr = ePulsar(par, tim,  ephem='DE436')
-            enterprise_Psrs.append(ePsr)
-            print('\rPSR {0} complete'.format(ePsr.name),end='',flush=True)
-            print(f'\n{count} pulsars created')
-            count +=1
-        else:
-            break
-    return enterprise_Psrs
 
 
 
@@ -168,25 +150,25 @@ def white_corr(epsrs):
 
 
 
-def enterprise_entry():
-    """Creates Enterprise Pulsars, finds the total timespan, their names, then writes it all to HDF5 file
+def enterprise_entry(ePsrs, edir):
+    """Writes enterprise.pulsar objects onto HDF5 file with WN Covariance matrix attributes.
+
+    - ePsrs (list): List of enterprise.pulsar objects
     """
-    ePsrs = pulsar_class(pars, tims)
-    Tspan = hsen.get_Tspan(ePsrs)
-    
-    #weird format HDF5 for list of strings
-    name_list = np.array(['X' for _ in range(kill_count)], dtype=h5py.string_dtype(encoding='utf-8'))
+   
     #computes all white noise covariance matrices for all the pulsars, a list of matrices
     wn_corrs = white_corr(ePsrs)
+    Tspan = hsen.get_Tspan(ePsrs)
     #adds each white noise covariance matrix as an attribute
     for i in range(len(ePsrs)):
         ePsrs[i].N = wn_corrs[i]
     
     del wn_corrs
 
-    with h5py.File(r'/home/gourliek/11_yr_enterprise_pulsars.hdf5', 'w') as f:
+    with h5py.File(edir, 'w') as f:
         Tspan_h5 = f.create_dataset('Tspan', (1,), float)
         Tspan_h5[:] = Tspan
+        name_list = np.array(['X' for _ in range(kill_count)], dtype=h5py.string_dtype(encoding='utf-8'))
         
         for i in range(len(ePsrs)): 
             hdf5_psr = f.create_group(ePsrs[i].name)
@@ -207,7 +189,7 @@ def enterprise_entry():
 
 
 
-def hsen_pulsar_entry(psr, type__):
+def hsen_pulsar_entry(psr, type__, dataset):
     """Writes Hasasia Pulsar attributes to an HDF5 file
 
     Args:
@@ -215,10 +197,10 @@ def hsen_pulsar_entry(psr, type__):
     - type__ (str): 'og' XOR 'rrf'
     """
     if type__ == 'og':
-        path = r'/home/gourliek/11_yr_pulsars_og.hdf5'
+        path = r'/home/gourliek/'+str(dataset)+r'_yr_pulsars_og.hdf5'
 
     elif type__ == 'rrf':
-        path = r'/home/gourliek/11_yr_pulsars_rrf.hdf5'
+        path = r'/home/gourliek/'+str(dataset)+r'_yr_pulsars_rrf.hdf5'
         
     with h5py.File(path, 'a') as f:
         hdf5_psr = f.create_group(psr.name)
@@ -268,7 +250,7 @@ def hsen_creation(ePsr, freqs):
     #setting name of hasasia pulsar
     psr.name = ePsr.name
     _ = psr.K_inv
-    hsen_pulsar_entry(psr, 'og')
+    hsen_pulsar_entry(psr, 'og', dataset)
 
     #enterprise pulsar is no longer needed
     del ePsr
@@ -294,7 +276,7 @@ def hsen_creation_rrf(ePsr):
     #setting name of hasasia pulsar
     psr.name = ePsr.name
     _ = psr.K_inv
-    hsen_pulsar_entry(psr, 'rrf') 
+    hsen_pulsar_entry(psr, 'rrf', dataset) 
 
     #enterprise pulsar is no longer needed
     del ePsr
@@ -302,7 +284,7 @@ def hsen_creation_rrf(ePsr):
 
 
 @profile(stream=hsen_psr_spec_mem)
-def hsen_spectra_creation(freqs, names)->list:
+def hsen_spectra_creation(freqs, names, dataset)->list:
     """Creation of hasasia spectrum pulsars 
 
     Args:
@@ -312,11 +294,12 @@ def hsen_spectra_creation(freqs, names)->list:
     Returns:
         - spectras (list): list of Hasasia Spectrum Pulsars
     """
-    start_time = time.time()
+    
     spectras = []
-    path = r'/home/gourliek/11_yr_pulsars_og.hdf5'
+    path = r'/home/gourliek/'+str(dataset)+r'_yr_pulsars_og.hdf5'
     with h5py.File(path, 'r') as f:
         for name in names:
+            start_time = time.time()
             psr = f[name]
             pseudo = PseudoSpectraPulsar(toas=psr['toas'][:], toaerrs=psr['toaerrs'][:], phi = psr['phi'][:][0],
                                     theta = psr['theta'][:][0], K_inv=psr['K_inv'][:], G=psr['G'][:], pdist=psr['pdist'][:],
@@ -343,7 +326,7 @@ def hsen_spectra_creation(freqs, names)->list:
 
     
 @profile(stream=hsen_psr_RRF_spec_mem)
-def hsen_spectra_creation_rrf(freqs, names)->list:
+def hsen_spectra_creation_rrf(freqs, freqs_gw, names, dataset)->list:
     """Creation of hasasia spectrum pulsars using RRF
 
     Args:
@@ -353,11 +336,11 @@ def hsen_spectra_creation_rrf(freqs, names)->list:
     Returns:
         - spectras (list): list of Hasasia Spectrum Pulsars
     """
-    start_time = time.time()
-    path = r'/home/gourliek/11_yr_pulsars_rrf.hdf5'
+    path = r'/home/gourliek/'+str(dataset)+r'_yr_pulsars_rrf.hdf5'
     spectras = []
     with h5py.File(path, 'r') as f:
         for name in names:
+            start_time = time.time()
             psr = f[name]
             pseudo = PseudoSpectraPulsar(toas=psr['toas'][:], toaerrs=psr['toaerrs'][:], phi = psr['phi'][:][0],
                                     theta = psr['theta'][:][0], pdist=psr['pdist'][:], K_inv=psr['K_inv'][:], G=psr['G'][:],
@@ -367,12 +350,12 @@ def hsen_spectra_creation_rrf(freqs, names)->list:
             if pseudo.name in rn_psrs.keys():
                 Amp, gam = rn_psrs[pseudo.name]
                 #creates spectrum hasasia pulsar to calculate characteristic straing
-                spec_psr = hsen.RRF_Spectrum(pseudo, amp = Amp, gamma = gam, freqs=freqs)
+                spec_psr = hsen.RRF_Spectrum(pseudo, freqs_gw=freqs_gw,amp = Amp, gamma = gam, freqs=freqs)
                 spec_psr.name = pseudo.name
             
             else:
                 #creates spectrum hasasia pulsar to calculate characteristic straing
-                spec_psr = hsen.RRF_Spectrum(pseudo, freqs=freqs)
+                spec_psr = hsen.RRF_Spectrum(pseudo, freqs=freqs, freqs_gw=freqs)
                 spec_psr.name = pseudo.name
 
             print(f'Hasasia Spectrum RRF {spec_psr.name} created\n')
@@ -516,13 +499,31 @@ def array_construction(ePsr, freqs):
 
 
 def yr_11_data():
-    
+    """Creates enterprise pulsars from the 11 yr dataset from parameter and timing files.
+
+    The quantities that are being returned within this function will be attributes used to write 
+    enterprise pulsars onto HDF5 file for 
+
+    Returns:
+        - psr_list (list): List of pulsars names
+        - enterprise_Psrs (list): List of enterprise pulsars 
+        - noise (dict): Noise parameters including fe/be of WN and RN.
+        - rn_psrs (dict): RN parameters where key is name of pulsar and value is list where 0th 
+        index is spectral amplitude and 1st index is spectral index
+        - Tspan: Total timespan of the PTA
+        - enterprise_dir: specific directory name used for enterprise HDF5 file
+    """
+
     #File Paths
     pardir = '/home/gourliek/Nanograv/11yr_stochastic_analysis-master/nano11y_data/partim/'
     timdir = '/home/gourliek/Nanograv/11yr_stochastic_analysis-master/nano11y_data/partim/'
     noise_dir = '/home/gourliek/Nanograv/11yr_stochastic_analysis-master'
     noise_dir += '/nano11y_data/noisefiles/'
     psr_list_dir = '/home/gourliek/Nanograv/11yr_stochastic_analysis-master/psrlist.txt'
+
+    #directory name of enterprise hdf5 file
+    dataset=11
+    
 
     #organizes files into alphabetical order
     pars = sorted(glob.glob(pardir+'*.par'))
@@ -564,105 +565,123 @@ def yr_11_data():
            'J1909-3744':[10**-13.9429, 2.38219],
            'J2145-0750':[10**-12.6893, 1.32307],
            }
-    return psr_list, pars, tims, noise, rn_psrs
+
+    edir = '/home/gourliek/11_yr_enterprise_pulsars.hdf5'
+    dataset=11
+    
+    
+      
+    return pars, tims, noise, rn_psrs, edir, dataset
 
 
 
 def yr_12_data():
+    """Creates enterprise pulsars from the 12.5 yr dataset from parameter and timing files.
+
+    The quantities that are being returned within this function will be attributes used to write 
+    enterprise pulsars onto HDF5 file for 
+
+    Returns:
+        - psr_list (list): List of pulsars names
+        - enterprise_Psrs (list): List of enterprise pulsars 
+        - noise (dict): Noise parameters including fe/be of WN and RN.
+        - rn_psrs (dict): RN parameters where key is name of pulsar and value is list where 0th 
+        index is spectral amplitude and 1st index is spectral index
+        - Tspan: Total timespan of the PTA
+        - enterprise_dir: specific directory name used for enterprise HDF5 file
+    """
+
     data_dir = r'/home/gourliek/Nanograv/12p5yr_stochastic_analysis-master/data/'
     par_dir = data_dir + r'par/'
     tim_dir = data_dir + r'tim/'
     noise_file = data_dir + r'channelized_12p5yr_v3_full_noisedict.json' 
-    par_files = sorted(glob.glob(par_dir+'*.par'))
 
-    #note par_files has length 46, while tim_files have length 45. Caused by J1713+0747_t2 par_files[21]
-    par_files.remove(par_files[21])
-    tim_files = sorted(glob.glob(tim_dir+'*.tim'))
-
-    #lists used
-    par_name_list = []   #pulsar names generated from the .par files
-    tim_name_list = []   #pulsar names generated from the .tim files
-    noise_name_list = [] #pulsar names generated from the noise .JSON file
-    psr_name_list = []   #offical pulsar list generated from the intersection between the pulsar names found in .tim, .par. and noise .JSON file
-    log_10_A__label_list = []  #temporary storage for log_10_A red noise parameter
-    gamma_label_list = []      #temporary storage for gamma red noise parameter     
-    noise = {}           #raw dictionary of all entires found in the noise .JSON file
-    #list of dictionaries of the red noise parameters in form: NAME: (log_10_A, gamma)
-    raw_white_noise = []     #future list of white noise values. Could be a branch within a branch to where a specific type can be chosen
-
-    #Uploading noise JSON file and loading it to the noise dictionary
-    with open(noise_file,'r') as line:
-            noise.update(json.load(line))
-    noise_labels = sorted(list(noise.keys()))   #don't use np.unique here cause it is a dictionary key
-
-    #Grabbing pulsar names from .par, .tim, and noise .JSON files
-    for par_name in par_files:
-        par_name_list.append(get_psrname(par_name))
-
-    for tim_name in tim_files:
-        tim_name_list.append(get_psrname(tim_name))
-
-    for noise_label in noise_labels:
-        noise_name_list.append(get_psrname(noise_label))
-
-    #This is required to remove all redundent pulsar names, and re-organize it as a sorted list
-    noise_name_list = np.unique(noise_name_list)
-
-    #Finds intersection between three lists. I had to do it this way and not the more efficent way from down below due to a duplicate name
-    for i in range(len(par_name_list)):
-        for j in range(len(tim_name_list)):
-            for k in range(len(noise_name_list)):
-                if par_name_list[i] == tim_name_list[j] and tim_name_list[j] == noise_name_list[k]:   #The intersection between all three lists
-                    psr_name_list.append(par_name_list[i])
-
-    #removes any duplicates using set, rewrites it as a list, and organizes the list
-    psr_name_list = np.unique(psr_name_list)
-    #This value is a standard number of 45 used repeatedly throughout the code.
-    num = len(psr_name_list)
-
-    #removing files so that the data only contains pulsars that they both have info on
-    par_files = [f for f in par_files if get_psrname(f) in psr_name_list]
-    tim_files = [f for f in tim_files if get_psrname(f) in psr_name_list]
-    #try to figure out a way to filer the noise dictionaries here
-
-    for i in range(num):
-        for noise_label in noise_labels:  
-            #excludes stars found in noise labels, but not in .tim or .par files
-            if psr_name_list[i] == get_psrname(noise_label):
-                #grabbing red noise parameter keys
-                if noise_label == psr_name_list[i] + '_red_noise_log10_A':
-                    log_10_A__label_list.append(noise_label)
-                    print("red noise parameter log_10_A discovered!\n")
-                elif noise_label == psr_name_list[i] + '_red_noise_gamma':
-                    gamma_label_list.append(noise_label)
-                    print("red noise parameter gamma discovered!\n")
-                else:
-                    raw_white_noise.append(noise_label)
-                    print("white noise parameter discovered\n")
-            else:
-                print(f"Star {get_psrname(noise_label)} is not found in the .tim or .par files")
-
-    raw_white_noise = np.unique(raw_white_noise)
+    #directory name of enterprise hdf5 file
     
-    #organization of noises
-    red_noise = []    
-    white_noise = []
-    for i in range(num):
-        red_item= {psr_name_list[i]: (noise[log_10_A__label_list[i]],noise[gamma_label_list[i]])}
-        stor = []
-        for noises in raw_white_noise:
-            if psr_name_list[i] == get_psrname(noises):
-                white_item = {noises: noise[noises]}
-                stor.append(white_item)
-        red_noise.append(red_item)
-        white_noise.append({psr_name_list[i]: stor})
+    
+    
+    #sorting parameter and timing files
+    parfiles = sorted(glob.glob(par_dir+'*.par'))
+    timfiles = sorted(glob.glob(tim_dir+'*.tim'))
 
-    return par_files, tim_files, noise, psr_name_list, red_noise, white_noise
+    #getting names of pulsars from timing files
+    par_psr_names = []
+    for file in parfiles:
+        par_psr_names.append(get_psrname(file))
 
-def hasasia_write():
+    #getting names of pulsars from parameter files
+    tim_psr_names = []
+    for file in timfiles:
+        tim_psr_names.append(get_psrname(file))
+
+    #grabbing intersection of names
+    psr_list= [item for item in tim_psr_names if item in par_psr_names]
+    
+    pars_v1 = [f for f in parfiles if get_psrname(f) in psr_list]
+
+     # ...filtering out the tempo parfile...
+    pars = [x for x in pars_v1 if 'J1713+0747_NANOGrav_12yv3.gls.par' not in x]
+    tims = [f for f in timfiles if get_psrname(f) in psr_list]
+
+    noise = {}
+    with open(noise_file, 'r') as fp:
+        noise.update(json.load(fp))
+
+    #initialize dictionary list with placeholders where parameters for rn will be held
+    rn_psrs = {}
+    for name in psr_list:
+        amp_key = name + '_red_noise_log10_A'
+        gamma_key = name + '_red_noise_gamma'
+        for key in noise:
+            if key == amp_key or key == gamma_key:
+                rn_psrs[name] = ['x','x']
+    
+    #place proper entries
+    for name in psr_list:
+        amp_key = name + '_red_noise_log10_A'
+        gamma_key = name + '_red_noise_gamma'
+        for key in noise:
+            if key == amp_key:
+                rn_psrs[name][0] = 10**noise[amp_key]  #because parameter is log_10()
+            elif key == gamma_key:
+                rn_psrs[name][1] = noise[gamma_key]
+
+    edir = '/home/gourliek/12_yr_enterprise_pulsars.hdf5'
+    dataset = 12
+    
+    return pars, tims, noise, rn_psrs, edir, dataset
+
+    
+    
+def enterprise_creation(pars, tims, dataset):
+    #generating enterprise pulsars with counter to choose how many i want
+    enterprise_Psrs = []
+    count = 1
+    if dataset == 11:
+        ephem = 'DE436'
+    elif dataset == 12:
+        ephem = 'DE438'
+    
+    for par,tim in zip(pars,tims):
+        if count <= kill_count:
+            ePsr = ePulsar(par, tim,  ephem=ephem)
+            enterprise_Psrs.append(ePsr)
+            print('\rPSR {0} complete'.format(ePsr.name),end='',flush=True)
+            print(f'\n{count} pulsars created')
+            count +=1
+        else:
+            break
+
+    
+      
+    return enterprise_Psrs
+
+
+
+def hasasia_write(file, psr_names):
     """Function that writes hasasia pulsars to HDF5. Comment this out if HDF5 files already created"""
-    for name in names_list:
-        psr = f[name]
+    for name in psr_names:
+        psr = file[name]
     
         pseudo = PseudoPulsar(toas=psr['toas'][:], toaerrs=psr['toaerrs'][:], phi = psr['phi'][:][0],
                                 theta = psr['theta'][:][0], pdist=psr['pdist'][:], N=psr['N'][:])
@@ -689,25 +708,39 @@ if __name__ == '__main__':
     null_time = time.time()
     Null_time_file.write(f'{null_time}\n')
     ###################################################
-    kill_count =  34 #max is 34 for 11yr dataset
-    thin = 1
+    #max is 34 for 11yr dataset
+    #max is 45 for 12yr dataset
+    kill_count =  45 
+    thin = 10
     ###################################################
     #lists for plotting sensitivity curves
     spectra_list = []
     spectra_list_r = []
+    #names list is list of names of pulsars stored within HDF5 file.
+    #This list is preferred because it does not require a new creation of enterprise objects
     names_list = [] 
     fyr = 1/(365.25*24*3600)
  
     #read time data for profiling
     with cProfile.Profile() as pr:
-        psr_list, pars, tims, noise, rn_psrs = yr_11_data()
+
+        #EITHER SELECT 11 yr or 12 yr
+        #pars, tims, noise, rn_psrs, edir, dataset = yr_11_data()
+        pars, tims, noise, rn_psrs, edir, dataset = yr_12_data()
+        ePsrs = enterprise_creation(pars, tims, dataset)
+        #exit()
+
+        
+
+        #frequencies used for PSD analysis
+        
         ##################################################
         #IF you need to re-create enterprise pulsars
-        #enterprise_entry()
+        enterprise_entry(ePsrs, edir)
         #exit()
         ##################################################
         
-        with h5py.File(r'/home/gourliek/11_yr_enterprise_pulsars.hdf5', 'r') as f:
+        with h5py.File(edir, 'r') as f:
             #memory map to hdf5 file
             Tspan_pt = f['Tspan']
             names_pt = f['names']
@@ -722,9 +755,11 @@ if __name__ == '__main__':
             for i in range(kill_count):
                 names_list.append(names[i].decode('utf-8'))
 
+            del names
+
             #this will loop through every pulsar created from HDF5 file
-            #hasasia_write()
-            spectra_list_r = hsen_spectra_creation_rrf(freqs, names_list)
+            hasasia_write(f, names_list)
+            spectra_list_r = hsen_spectra_creation_rrf(freqs=freqs, freqs_gw=freqs, names=names_list, dataset=dataset)
             ng11yr_rrf_sc = hsen.GWBSensitivityCurve(spectra_list_r)
             ng11yr_rrf_dsc = hsen.DeterSensitivityCurve(spectra_list_r)
             rrf_sc_hc = ng11yr_rrf_sc.h_c
@@ -733,7 +768,7 @@ if __name__ == '__main__':
             rrf_dsc_freqs = ng11yr_rrf_dsc.freqs
             del ng11yr_rrf_sc, ng11yr_rrf_dsc, spectra_list_r
 
-            spectra_list = hsen_spectra_creation(freqs, names_list)
+            spectra_list = hsen_spectra_creation(freqs, names_list, dataset)
             ng11yr_sc = hsen.GWBSensitivityCurve(spectra_list)
             ng11yr_dsc = hsen.DeterSensitivityCurve(spectra_list)
             sc_hc = ng11yr_sc.h_c
@@ -752,7 +787,7 @@ if __name__ == '__main__':
         stats.sort_stats(pstats.SortKey.CUMULATIVE)
         stats.print_stats()
      
-
+        #all off by a scaling factor of sqrt(2) ##FIND THE SOURCE
         plt.loglog(sc_freqs,sc_hc, label='Norm Stoch')
         plt.loglog(dsc_freqs,dsc_hc, label='Norm Det')
         plt.loglog(rrf_sc_freqs,rrf_sc_hc, label='RRF Stoch')
@@ -763,7 +798,6 @@ if __name__ == '__main__':
         plt.legend()
         plt.savefig(path+'/GWB_h_c.png')
         plt.close()
-        print(sc_hc/rrf_sc_hc)
 
 
   
