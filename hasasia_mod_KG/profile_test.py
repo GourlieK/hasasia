@@ -109,6 +109,7 @@ def make_corr(psr):
         corr (array): white noise covariance matrix
     """
     corr_matrix_mem.write(f"{psr.name}\n")
+    corr_matrix_mem.flush()
     N = psr.toaerrs.size
     corr = np.zeros((N,N))
     _, _, fl, _, bi = hsen.quantize_fast(psr.toas,psr.toaerrs,
@@ -228,6 +229,7 @@ def hsen_creation(ePsr, freqs):
     #benchmark stuff
     
     corr_from_psd_mem.write(f'Pulsar: {ePsr.name}\n')
+    corr_from_psd_mem.flush()
     #start_time = time.time()
     #building red noise powerlaw using standard amplitude and gamma
     plaw = hsen.red_noise_powerlaw(A=9e-16, gamma=13/3., freqs=freqs)
@@ -314,6 +316,7 @@ def hsen_spectra_creation(freqs, names, dataset)->list:
             ########################################
             #quantity is called up so it is computed
             get_NcalInv_mem.write(f'Pulsar: {name}\n')
+            get_NcalInv_mem.flush()
             NcalInv_time_start = time.time()
             _ = spec_psr.NcalInv
             NcalInv_time_end = time.time()
@@ -321,6 +324,8 @@ def hsen_spectra_creation(freqs, names, dataset)->list:
             end_time = time.time()
             NcalInv_time_file.write(f"{name}\t{NcalInv_time_end-NcalInv_time_start}\n")
             time_increments.write(f"OG {name} {start_time-null_time} {end_time-null_time}\n")
+            NcalInv_time_file.flush()
+            time_increments.flush()
             spectras.append(spec_psr)
     return spectras
 
@@ -364,6 +369,7 @@ def hsen_spectra_creation_rrf(freqs, freqs_gw, names, dataset)->list:
             ########################################
             #quantity is called up so it is computed
             get_NcalInv_RFF_mem.write(f'Pulsar: {name}\n')
+            get_NcalInv_RFF_mem.flush()
             NcalInv_time_start = time.time()
             _ = spec_psr.NcalInv
             NcalInv_time_end = time.time()
@@ -371,6 +377,8 @@ def hsen_spectra_creation_rrf(freqs, freqs_gw, names, dataset)->list:
             ########################################
             NcalInv_RRF_time_file.write(f"RRF{name}\t{NcalInv_time_end-NcalInv_time_start}\n")
             time_increments.write(f"RRF {name} {start_time-null_time} {end_time-null_time}\n")
+            NcalInv_RRF_time_file.flush()
+            time_increments.flush()
             spectras.append(spec_psr)
     return spectras
 
@@ -692,6 +700,8 @@ def hasasia_write(file, psr_names):
         
         hsen_psr_mem.write(f'Pulsar: {name}\n')
         hsen_psr_RRF_mem.write(f'Pulsar: {name}\n')
+        hsen_psr_mem.flush()
+        hsen_psr_RRF_mem.flush()
         
         hsen_creation(pseudo, freqs)
         hsen_creation_rrf(pseudo)
@@ -707,6 +717,8 @@ def hasasia_write(file, psr_names):
 if __name__ == '__main__':
     null_time = time.time()
     Null_time_file.write(f'{null_time}\n')
+    Null_time_file.flush()
+    Null_time_file.close()
     ###################################################
     #max is 34 for 11yr dataset
     #max is 45 for 12yr dataset
@@ -793,7 +805,7 @@ if __name__ == '__main__':
         plt.loglog(rrf_sc_freqs,rrf_sc_hc, label='RRF Stoch')
         plt.loglog(rrf_dsc_freqs,rrf_dsc_hc, label='RRF Det')
         plt.ylabel('Characteristic Strain, $h_c$')
-        plt.title('NANOGrav 11-year Data Set Sensitivity Curve')
+        plt.title('NANOGrav 12-year Data Set Sensitivity Curve')
         plt.grid(which='both')
         plt.legend()
         plt.savefig(path+'/GWB_h_c.png')
