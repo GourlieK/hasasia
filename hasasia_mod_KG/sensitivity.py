@@ -2,17 +2,24 @@
 from __future__ import print_function
 """Main module."""
 import numpy  as np
-import jax
+import hasasia, jax
+from functools import cached_property
 import jax.numpy as jnp
 import jax.scipy as jsc
 import itertools as it
 import scipy.stats as sps
 import scipy.linalg as sl
-import os, pickle
+import os, pickle, functools
 from astropy import units as u
-import hasasia
+from dataclasses import replace
 
-
+from functools import partial
+import equinox as eqx
+jax.config.update("jax_enable_x64", True)
+os.environ["JAX_COMPILATION_CACHE_DIR"] = "/tmp/jax_cache"
+jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
+from jax.experimental.compilation_cache import compilation_cache as cc
+cc.set_cache_dir("/tmp/jax_cache")
 
 #KG: changed from .utils
 from utils import create_design_matrix
@@ -21,9 +28,14 @@ from utils import create_design_matrix
 import time
 from memory_profiler import profile 
 path = r'/home/gourliek/Desktop/Profile_Data'
+#memory profile for Default NcalInv computation
 get_NcalInv_mem = open(path + '/NcalInv_mem.txt','w')
+#memory profile for Rank Redduced Formalism NcalInv computation
+get_NcalInv_RFF_mem = open(path + '/NcalInvRRF_mem.txt','w')
+#memory profile for computation of K_inv
+get_K_inv_mem = open(path + '/get_K_inv_mem.txt','w')
+#memory profile for computation of correlation matrix for the Red Noise, which is needed for default
 corr_from_psd_mem = open(path + '/corr_from_psd_mem.txt','w')
-Ncal_time_file = open(path + '/Ncal_meth_time.txt','a')
 
 
 
@@ -54,6 +66,7 @@ __all__ =['GWBSensitivityCurve',
 ## Some constants
 yr_sec = 365.25*24*3600
 fyr = 1/yr_sec
+
 
 def R_matrix(designmatrix, N):
     """
@@ -197,116 +210,7 @@ def get_Tf(designmatrix, toas, N=None, nf=200, fmin=None, fmax=2e-7,
 
     return np.real(Tmat), ff, T
 
-#KG change: function to test jax.jit
-def method(N,G):
-    L = jsc.linalg.cholesky(N) 
-    del N           
-    A = jnp.matmul(L,G)
-    del L
-    Ncal = jnp.matmul(A.T,A)
-    del A
-    NcalInv = jnp.linalg.inv(Ncal)
-    return Ncal, NcalInv
-
-method_jit = jax.jit(method)
-
-#KG: added profile decorator to gather memory data
-@profile(stream = get_NcalInv_mem)
-def get_NcalInv(psr, nf=200, fmin=None, fmax=2e-7, freqs=None,
-                exact_yr_freqs = False, full_matrix=False,
-                return_Gtilde_Ncal=False, tm_fit=True, Gmatrix=None):
-    r"""
-    Calculate the inverse-noise-wieghted transmission function for a given
-    pulsar. This calculates
-    :math:`\mathcal{N}^{-1}(f,f') , \; \mathcal{N}^{-1}(f)`
-    in `[1]`_, see Equations (19-20).
-
-    .. _[1]: https://arxiv.org/abs/1907.04341
-
-    Parameters
-    ----------
-
-    psr : array
-        Pulsar object.
-
-    nf : int, optional
-        Number of frequencies at which to calculate transmission function.
-
-    fmin : float, optional
-        Minimum frequency at which to calculate transmission function.
-
-    fmax : float, optional
-        Maximum frequency at which to calculate transmission function.
-
-    exact_yr_freqs : bool, optional
-        Whether to use exact 1/year and 2/year frequency values in calculation.
-
-    full_matrix : bool, optional
-        Whether to return the full, two frequency NcalInv.
-
-    return_Gtilde_Ncal : bool, optional
-        Whether to return Gtilde and Ncal. Gtilde is the Fourier transform of
-        the G-matrix.
-
-    tm_fit : bool, optional
-        Whether to include the timing model fit in the calculation.
-
-    Gmatrix : ndarray, optional
-        Provide already calculated G-matrix. This can speed up calculations
-        since the singular value decomposition can take time for large matrices.
-
-    Returns
-    -------
-
-    inverse-noise-weighted transmission function
-
-    """
-    toas = psr.toas
-    # make filter
-    T = toas.max()-toas.min()
-    f0 = 1 / T
-    if freqs is None:
-        if fmin is None:
-            fmin = f0/5
-        ff = np.logspace(np.log10(fmin), np.log10(fmax), nf,dtype='float128')
-        if exact_yr_freqs:
-            ff = np.sort(np.append(ff,[fyr,2*fyr]))
-            nf +=2
-    else:
-        nf = len(freqs)
-        ff = freqs
-
-    if tm_fit:
-        if Gmatrix is None:
-            G = G_matrix(psr.designmatrix)
-        else:
-            G = Gmatrix
-    else:
-        G = np.eye(toas.size)
-
-    Gtilde = np.zeros((ff.size,G.shape[1]),dtype='complex128')
-    #N_freqs x N_TOA-N_par
-
-    # Note we do not include factors of NTOA or Timespan as they cancel
-    # with the definition of Ncal
-    Gtilde = np.dot(np.exp(1j*2*np.pi*ff[:,np.newaxis]*toas),G)
-    # N_freq x N_TOA-N_par
-
-    #KG: cholesky decomposition of covariance matrix method
-    start_time_chol = time.time()
-    N = psr.N
-    Ncal, NcalInv = method_jit(N,G)
-    end_time_chol = time.time()
-    Ncal_time_file.write(f'Cholesky: ({start_time_chol},{end_time_chol})\n')
-
-    TfN = np.matmul(np.conjugate(Gtilde),np.matmul(NcalInv,Gtilde.T)) / 2
-    if return_Gtilde_Ncal:
-        return np.real(TfN), Gtilde, Ncal
-    elif full_matrix:
-        return np.real(TfN)
-    else:
-        return np.real(np.diag(TfN)) / get_Tspan([psr])
-
+@eqx.filter_jit 
 def resid_response(freqs):
     r"""
     Returns the timing residual response function for a pulsar across as set of
@@ -317,7 +221,7 @@ def resid_response(freqs):
 
     .. _[1]: https://arxiv.org/abs/1907.04341
     """
-    return 1/(12 * np.pi**2 * freqs**2)
+    return 1/(12 * jnp.pi**2 * freqs**2)
 
 
 class Pulsar(object):
@@ -357,6 +261,7 @@ class Pulsar(object):
         self.phi = phi
         self.theta = theta
         self.pdist = make_quant(pdist,'kpc')
+        #for caching
 
         if N is None:
             self.N = np.diag(toaerrs**2) #N ==> weights
@@ -375,6 +280,332 @@ class Pulsar(object):
         if not hasattr(self, '_G'):
             self._G = G_matrix(designmatrix=self.designmatrix)
         return self._G
+    
+    @cached_property 
+    @profile(stream = get_K_inv_mem)
+    def K_inv(self):
+        get_K_inv_mem.write(f"{self.name}\n")
+        """
+        K_inv is used later in RREF NcalInv calculation.
+        :math: (G^{T} C_{WN} G)^{-1}
+
+        Note that the computation of K_inv will remove the white noise covariance matrix.
+        This will have the computation of the Transmission function, get_TfN not possible.
+        """
+        L = sl.cholesky(self.N)
+        #If K_inv is calculated, then N will not be needed
+        delattr(self, 'N')          
+        A = jnp.matmul(L,self.G)
+        del L
+        K = jnp.matmul(A.T,A)
+        del A
+        return jnp.linalg.inv(K)
+
+#KG rrf changes
+class RRF_Spectrum(eqx.Module):
+    """Class to encode the spectral information for a single pulsar for use in Rank Reduced Formalism.
+
+    Parameters
+    ----------
+
+    psr : `hasasia.Pulsar`
+        A `hasasia.Pulsar` instance.
+
+    amp : float
+        Pulsar red noise spectra amplitude
+
+    gamma: float
+        Pulsar red noise spectral index
+
+    nf : int, optional
+        Number of frequencies over which to build the various spectral
+        densities.
+
+    fmin : float, optional [Hz]
+        Minimum frequency over which to build the various spectral
+        densities. Defaults to the timespan/5 of the pulsar.
+
+    fmax : float, optional [Hz]
+        Minimum frequency over which to build the various spectral
+        densities.
+
+    freqs : array, optional [Hz]
+        Optionally supply an array of frequencies over which to build the
+        various spectral densities.
+    """
+    psr: object = eqx.field(static=True)
+    toas: jax.Array
+    toaerrs: jax.Array
+    phi: jax.Array
+    theta: jax.Array
+    G: jax.Array
+    N: jax.Array = None
+    K_inv: jax.Array = None
+    designmatrix: jax.Array
+    pdist: jax.Array
+    amp: float = None
+    gamma: float = None
+    freqs_gw: jax.Array
+    tm_fit: bool = True
+    Tf_kwargs: dict = eqx.static_field(default_factory=dict)
+    freqs: jax.Array
+    _psd_prefit: jax.Array
+    _H_0: float
+    name: str = eqx.static_field()
+
+    def __init__(self, psr, freqs_gw, amp = None, gamma = None, nf=400, fmin=None,
+                  fmax=2e-7, freqs=None,  tm_fit=True, **Tf_kwargs):
+        
+        self._H_0 = 72 * u.km / u.s / u.Mpc
+        self.toas = jnp.array(psr.toas)
+        self.toaerrs = jnp.array(psr.toaerrs)
+        self.phi = jnp.array(psr.phi)
+        self.theta = jnp.array(psr.theta)
+        self.G = jnp.array(psr.G)
+
+        self.psr = psr
+        self.K_inv = jnp.array(psr.K_inv)
+    
+        self.designmatrix = jnp.array(psr.designmatrix)
+        self.pdist = jnp.array(psr.pdist)
+        self.amp = amp
+        self.gamma = gamma
+        self.freqs_gw = jnp.array(freqs_gw)
+        self.tm_fit = tm_fit
+        self.Tf_kwargs = Tf_kwargs
+
+        if freqs is None:
+            f0 = 1 / get_Tspan([psr])
+            if fmin is None:
+                fmin = f0 / 5
+            self.freqs = jnp.logspace(jnp.log10(fmin), jnp.log10(fmax), nf)
+        else:
+            self.freqs = jnp.array(freqs)
+
+        self._psd_prefit = jnp.zeros_like(self.freqs)
+        self.name = psr.name
+
+    @cached_property
+    def psd_postfit(self):
+        """Postfit Residual Power Spectral Density"""
+        return self.psd_prefit * self.NcalInv
+
+    @property
+    def psd_prefit(self):
+        """Prefit Residual Power Spectral Density"""
+        if jnp.all(self._psd_prefit==0):
+            raise ValueError('Must set Prefit Residual Power Spectral Density.')
+            # print('No Prefit Residual Power Spectral Density set.\n'
+            #       'Setting psd_prefit to harmonic mean of toaerrs.')
+            # sigma = sps.hmean(self.toaerrs)
+            # dt = 14*24*3600 # 2 Week Cadence
+            # self.add_white_noise_pow(sigma=sigma,dt=dt)
+
+        return self._psd_prefit
+
+    #################################NEED TO DEAL WITH self.N because ONLY quantity needed it is Tf
+    @cached_property
+    def Tf(self):
+        self._Tf,_,_ = get_Tf(designmatrix=self.designmatrix,
+                                toas=self.toas, N=self.N,
+                                freqs=self.freqs, from_G=True, Gmatrix=self.G,
+                                **self.Tf_kwargs)
+        return self._Tf
+    
+
+    @cached_property
+    def CirnInv(self):
+        """Intrinsic Red Noise Covariance Matrix
+        """
+        nf = len(self.freqs)
+        #for pulsars with no red noise power
+        if self.gamma == None or self.amp == None:
+            C_rn_inv = jnp.zeros((2*nf, 2*nf))
+        else:
+            #creation of fourier coeffiecent covariance matrix, and computes inverse
+            C_rn_proto = self.add_red_noise_power(A=self.amp, gamma=self.gamma, vals=True)
+            C_rn_inv = jnp.zeros((2*nf, 2*nf))
+            C_rn_inv = C_rn_inv.at[::2, ::2].set(jnp.diag(1/C_rn_proto))
+            C_rn_inv = C_rn_inv.at[1::2, 1::2].set(jnp.diag(1/C_rn_proto))
+            del C_rn_proto
+        return C_rn_inv
+    
+    @cached_property
+    def CgwInv(self):
+        """Gravitational Wave Red Noise Covariance Matrix
+        """
+        nf = self.freqs.size
+        f_sub = jnp.zeros(nf)
+
+        # Create a mask for elements in f that are in f_gw typed statically
+        mask = jnp.isin(self.freqs, self.freqs_gw)
+        f_sub = jnp.where(mask, self.freqs, 0.0)
+
+        C_gwb_proto = self.add_red_noise_power(9e-16, gamma=13/3., vals=True, f_gw=f_sub)
+        C_gwb_inv = jnp.zeros((2*nf, 2*nf))
+        C_gwb_inv = C_gwb_inv.at[::2, ::2].set(jnp.diag(1/C_gwb_proto))
+        C_gwb_inv = C_gwb_inv.at[1::2, 1::2].set(jnp.diag(1/C_gwb_proto))
+        del C_gwb_proto
+        return C_gwb_inv
+
+    @cached_property
+    @eqx.filter_jit
+    @eqx.debug.assert_max_traces(max_traces=45)
+    @profile(stream = get_NcalInv_RFF_mem)
+    def NcalInv(self, full_matrix=False, return_Gtilde_Ncal=False):
+        """_summary_
+
+        Args:
+            full_matrix (bool, optional): _description_. Defaults to False.
+            return_Gtilde_Ncal (bool, optional): _description_. Defaults to False.
+
+        Returns:, 
+            _type_: _description_
+        """
+        nf = len(self.freqs)
+        T = self.toas.max()-self.toas.min()
+        #for pulsars with no red noise power
+     
+        #Fourier Design matrix
+        N = len(self.toas)
+        F  = jnp.zeros((N, 2 * nf))
+        f = 1.0 * jnp.arange(1, nf + 1) / T
+        F = F.at[:, ::2].set(jnp.sin(2 * jnp.pi * self.toas[:, None] * f[None, :]))
+        F = F.at[:, 1::2].set(jnp.cos(2 * jnp.pi * self.toas[:, None] * f[None, :]))
+   
+        J = jnp.matmul(self.G.T, F)
+        del F
+            
+        Z = jnp.matmul(J.T, self.K_inv)
+        Sigma = jnp.matmul(Z, J) + self.CirnInv + self.CgwInv
+        SigmaInv = jnp.linalg.inv(Sigma)
+
+        del J, Sigma
+        
+        Gtilde = jnp.zeros((self.freqs.size,self.G.shape[1]),dtype='complex128')
+        Gtilde = jnp.dot(jnp.exp(1j*2*jnp.pi*self.freqs[:,jnp.newaxis]*self.toas),self.G)
+
+        NcalInv = (self.K_inv + jnp.matmul(Z.T, jnp.matmul(SigmaInv, Z))) / 2#divide by 2 for some reason   
+
+        del SigmaInv, Z
+        #divided by 4, not 2 for some reason, possibly some normalization stuff
+        TfN = jnp.matmul(jnp.conjugate(Gtilde),jnp.matmul(NcalInv,Gtilde.T)) / 2
+    
+        if return_Gtilde_Ncal:
+            return jnp.real(TfN), Gtilde, jnp.linalg.inv(NcalInv)
+        elif full_matrix:
+            return jnp.real(TfN)
+        else:
+            return jnp.real(jnp.diag(TfN)) / get_Tspan([self])
+            
+    @cached_property
+    def P_n(self):
+        """Inverse Noise Weighted Transmission Function."""
+        self._P_n = jnp.power(self.NcalInv, -1)
+        return self._P_n
+
+    @cached_property
+    @eqx.filter_jit
+    def S_I(self):
+        r"""Strain power sensitivity for this pulsar. Equation (74) in `[1]`_
+
+        .. math::
+            S_I=\frac{1}{\mathcal{N}^{-1}\;\mathcal{R}}
+
+        .. _[1]: https://arxiv.org/abs/1907.04341
+        """
+        return 1/resid_response(self.freqs)/self.NcalInv
+
+    @cached_property
+    def S_R(self):
+        r"""Residual power sensitivity for this pulsar.
+
+        .. math::
+            S_R=\frac{1}{\mathcal{N}^{-1}}
+
+        """
+        return 1/self.NcalInv
+
+    @cached_property
+    def h_c(self):
+        r"""Characteristic strain sensitivity for this pulsar.
+
+        .. math::
+            h_c=\sqrt{f\;S_I}
+        """
+        return jnp.sqrt(self.freqs * self.S_I)
+
+    @cached_property
+    def Omega_gw(self):
+        r"""Energy Density sensitivity.
+
+        .. math::
+            \Omega_{gw}=\frac{2\pi^2}{3\;H_0^2}f^3\;S_I
+        """
+        return ((2*jnp.pi**2/3) * self.freqs**3 * self.S_I
+                           / self._H_0.to('Hz').value**2)
+
+    def add_white_noise_power(self, sigma=None, dt=None, vals=False):
+        r"""
+        Add power law red noise to the prefit residual power spectral density.
+
+        **Note:** All noise information is furnished by the covariance matrix in
+        the `hasasia.Pulsar` object, this is simply useful for bookkeeping and
+        plots.
+
+        Parameters
+        ----------
+        sigma : float
+            TOA error.
+
+        dt : float
+            Time between observing epochs in [seconds].
+
+        vals : bool
+            Whether to return the psd values as an array. Otherwise just added
+            to `self.psd_prefit`.
+        """
+        white_noise = 2.0 * dt * (sigma)**2 * jnp.ones_like(self.freqs)
+        self = replace(self, _psd_prefit = self._psd_prefit + white_noise) 
+        if vals:
+            return white_noise
+
+    @eqx.filter_jit
+    def add_red_noise_power(self, A=None, gamma=None, vals=False, f_gw=None):
+        """
+        Add power law red noise to the prefit residual power spectral density.
+        As :math:`P=A^2(f/fyr)^{-\gamma}`.
+
+        Parameters
+        ----------
+        A : float
+            Amplitude of red noise.
+
+        gamma : float
+            Spectral index of red noise powerlaw.
+
+        vals : bool
+            Whether to return the psd values as an array. Otherwise just added
+            to `self.psd_prefit`.
+        """
+        if f_gw is None:
+            ff = self.freqs
+        else:
+            ff = f_gw
+        red_noise = A**2*(ff/fyr)**(-gamma)/(12*np.pi**2) * yr_sec**3
+        self = replace(self, _psd_prefit = self._psd_prefit + red_noise)  #
+        if vals:
+            return red_noise
+
+    def add_noise_power(self,noise):
+        r"""Add any spectrum of noise. Must match length of frequency array.
+
+        **Note:** All noise information is furnished by the covariance matrix in
+        the `hasasia.Pulsar` object, this is simply useful for bookkeeping and
+        plots.
+        """
+        self = replace(self, _psd_prefit = self._psd_prefit + noise) 
+
 
 class Spectrum(object):
     """Class to encode the spectral information for a single pulsar.
@@ -408,7 +639,13 @@ class Spectrum(object):
         self.toaerrs = psr.toaerrs
         self.phi = psr.phi
         self.theta = psr.theta
-        self.N = psr.N
+
+        #Either will use K_inv or N
+        if hasattr(psr, 'N'):
+            self.N = psr.N
+        else:
+            self.K_inv = psr.K_inv 
+       
         self.G = psr.G
         self.designmatrix = psr.designmatrix
         self.pdist = psr.pdist
@@ -424,12 +661,10 @@ class Spectrum(object):
 
         self._psd_prefit = np.zeros_like(self.freqs)
 
-    @property
+    @cached_property
     def psd_postfit(self):
         """Postfit Residual Power Spectral Density"""
-        if not hasattr(self, '_psd_postfit'):
-            self._psd_postfit = self.psd_prefit * self.NcalInv
-        return self._psd_postfit
+        return self.psd_prefit * self.NcalInv
 
     @property
     def psd_prefit(self):
@@ -444,32 +679,121 @@ class Spectrum(object):
 
         return self._psd_prefit
 
-    @property
+    @cached_property
     def Tf(self):
         if not hasattr(self, '_Tf'):
-            self._Tf,_,_ = get_Tf(designmatrix=self.designmatrix,
+            _Tf,_,_ = get_Tf(designmatrix=self.designmatrix,
                                   toas=self.toas, N=self.N,
                                   freqs=self.freqs, from_G=True, Gmatrix=self.G,
                                   **self.Tf_kwargs)
-        return self._Tf
+        return _Tf
 
-    @property
-    def NcalInv(self):
-        """Inverse Noise Weighted Transmission Function."""
-        if not hasattr(self, '_NcalInv'):
-            self._NcalInv = get_NcalInv(psr=self, freqs=self.freqs,
-                                        tm_fit=self.tm_fit, Gmatrix=self.G)
-        return self._NcalInv
 
-    @property
+    @cached_property
+    @profile(stream = get_NcalInv_mem)
+    def NcalInv(self, nf=200, fmin=None, fmax=2e-7, freqs=None,
+                exact_yr_freqs = False, full_matrix=False,
+                return_Gtilde_Ncal=False, tm_fit=True, Gmatrix=None):
+        """
+        Calculate the inverse-noise-wieghted transmission function for a given
+        pulsar. This calculates
+        :math:`\mathcal{N}^{-1}(f,f') , \; \mathcal{N}^{-1}(f)`
+        in `[1]`_, see Equations (19-20).
+
+        .. _[1]: https://arxiv.org/abs/1907.04341
+
+        Parameters
+        ----------
+
+        psr : array
+            Pulsar object.
+
+        nf : int, optional
+            Number of frequencies at which to calculate transmission function.
+
+        fmin : float, optional
+            Minimum frequency at which to calculate transmission function.
+
+        fmax : float, optional
+            Maximum frequency at which to calculate transmission function.
+
+        exact_yr_freqs : bool, optional
+            Whether to use exact 1/year and 2/year frequency values in calculation.
+
+        full_matrix : bool, optional
+            Whether to return the full, two frequency NcalInv.
+
+        return_Gtilde_Ncal : bool, optional
+            Whether to return Gtilde and Ncal. Gtilde is the Fourier transform of
+            the G-matrix.
+
+        tm_fit : bool, optional
+            Whether to include the timing model fit in the calculation.
+
+        Gmatrix : ndarray, optional
+            Provide already calculated G-matrix. This can speed up calculations
+            since the singular value decomposition can take time for large matrices.
+
+        Returns
+        -------
+
+        inverse-noise-weighted transmission function
+
+        """
+        #Defining Ncal and NcalInv depending on existence of self.N or self.K_inv
+        toas = self.toas
+        freqs = self.freqs
+        Gmatrix = self.G
+
+        # make filter
+        T = toas.max()-toas.min()
+        f0 = 1 / T
+        if freqs is None:
+            if fmin is None:
+                fmin = f0/5
+                #changed from float128 to float64 due to complex256 being created
+            ff = np.logspace(np.log10(fmin), np.log10(fmax), nf,dtype='float64')
+            if exact_yr_freqs:
+                ff = np.sort(np.append(ff,[fyr,2*fyr]))
+                nf +=2
+        else:
+            nf = len(freqs)
+            ff = freqs
+
+        if tm_fit:
+            if Gmatrix is None:
+                G = G_matrix(self.designmatrix)
+            else:
+                G = Gmatrix
+        else:
+            G = np.eye(toas.size)
+
+        Gtilde = np.zeros((ff.size,G.shape[1]),dtype='complex128')
+        
+        #N_freqs x N_TOA-N_par
+
+        # Note we do not include factors of NTOA or Timespan as they cancel
+        # with the definition of Ncal
+        Gtilde = jnp.dot(np.exp(1j*2*np.pi*ff[:,np.newaxis]*toas),G)
+        
+        # N_freq x N_TOA-N_par
+
+        TfN = jnp.matmul(np.conjugate(Gtilde),jnp.matmul(self.K_inv,Gtilde.T)) / 2
+
+        if return_Gtilde_Ncal:
+            return np.real(TfN), Gtilde, np.linalg.inv(self.K_inv)
+        elif full_matrix:
+            return np.real(TfN)
+        else:
+            return np.real(np.diag(TfN)) / get_Tspan([self])
+
+    @cached_property
     def P_n(self):
         """Inverse Noise Weighted Transmission Function."""
-        if not hasattr(self, '_P_n'):
-            self._P_n = np.power(get_NcalInv(psr=self, freqs=self.freqs,
+        return np.power(self.NcalInv(psr=self, freqs=self.freqs,
                                              tm_fit=False), -1)
-        return self._P_n
 
-    @property
+    @cached_property
     def S_I(self):
         r"""Strain power sensitivity for this pulsar. Equation (74) in `[1]`_
 
@@ -478,11 +802,9 @@ class Spectrum(object):
 
         .. _[1]: https://arxiv.org/abs/1907.04341
         """
-        if not hasattr(self, '_S_I'):
-            self._S_I = 1/resid_response(self.freqs)/self.NcalInv
-        return self._S_I
+        return 1/resid_response(self.freqs)/self.NcalInv
 
-    @property
+    @cached_property
     def S_R(self):
         r"""Residual power sensitivity for this pulsar.
 
@@ -490,31 +812,26 @@ class Spectrum(object):
             S_R=\frac{1}{\mathcal{N}^{-1}}
 
         """
-        if not hasattr(self, '_S_R'):
-            self._S_R = 1/self.NcalInv
-        return self._S_R
+        return 1/self.NcalInv
 
-    @property
+    @cached_property
     def h_c(self):
         r"""Characteristic strain sensitivity for this pulsar.
 
         .. math::
             h_c=\sqrt{f\;S_I}
         """
-        if not hasattr(self, '_h_c'):
-            self._h_c = np.sqrt(self.freqs * self.S_I)
-        return self._h_c
+        return np.sqrt(self.freqs * self.S_I)
 
-    @property
+    @cached_property
     def Omega_gw(self):
         r"""Energy Density sensitivity.
 
         .. math::
             \Omega_{gw}=\frac{2\pi^2}{3\;H_0^2}f^3\;S_I
         """
-        self._Omega_gw = ((2*np.pi**2/3) * self.freqs**3 * self.S_I
+        return ((2*np.pi**2/3) * self.freqs**3 * self.S_I
                            / self._H_0.to('Hz').value**2)
-        return self._Omega_gw
 
     def add_white_noise_power(self, sigma=None, dt=None, vals=False):
         r"""
@@ -596,11 +913,14 @@ class SensitivityCurve(object):
         # f0 = 1 / self.Tspan
         # if fmin is None:
         #     fmin = f0/5
-
+        
         #Check to see if all frequencies are equal.
-        freq_check = [sp.freqs for sp in spectra]
-        if np.all(freq_check == spectra[0].freqs):
-            self.freqs = spectra[0].freqs
+        freq_check = np.array([sp.freqs.tolist() for sp in spectra])
+        compare_freq = np.array(spectra[0].freqs.tolist())
+      
+        if np.all(freq_check== compare_freq):
+            self.freqs = compare_freq
+            #self = replace(self, freqs = compare_freq)
         else:
             raise ValueError('All frequency arrays must match for sensitivity'
                              ' curve calculation!!')
@@ -890,7 +1210,7 @@ def HellingsDownsCoeff(phi, theta, autocorr=False):
     """
 
     Npsrs = len(phi)
-    # Npairs = np.int(Npsrs * (Npsrs-1) / 2.)
+    #Npairs = np.int(Npsrs * (Npsrs-1) / 2.)
     psr_idx = np.arange(Npsrs)
     pairs = list(it.combinations(psr_idx,2))
     first, second = list(map(list, zip(*pairs)))
@@ -1056,8 +1376,9 @@ def get_Tspan(psrs):
     """
     Returns the total timespan from a list or arry of Pulsar objects, psrs.
     """
-    last = np.amax([p.toas.max() for p in psrs])
-    first = np.amin([p.toas.min() for p in psrs])
+    #must be jax arrays and not lists
+    last = jnp.amax(jnp.array([p.toas.max() for p in psrs]))
+    first = jnp.amin(jnp.array([p.toas.min() for p in psrs]))
     return last - first
 
 def get_TspanIJ(psr1,psr2):
