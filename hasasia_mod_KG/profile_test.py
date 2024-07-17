@@ -739,7 +739,7 @@ if __name__ == '__main__':
         #EITHER SELECT 11 yr or 12 yr
         #pars, tims, noise, rn_psrs, edir, dataset = yr_11_data()
         pars, tims, noise, rn_psrs, edir, dataset = yr_12_data()
-        ePsrs = enterprise_creation(pars, tims, dataset)
+        #ePsrs = enterprise_creation(pars, tims, dataset)
         #exit()
 
         
@@ -748,7 +748,7 @@ if __name__ == '__main__':
         
         ##################################################
         #IF you need to re-create enterprise pulsars
-        enterprise_entry(ePsrs, edir)
+        #enterprise_entry(ePsrs, edir)
         #exit()
         ##################################################
         
@@ -770,7 +770,7 @@ if __name__ == '__main__':
             del names
 
             #this will loop through every pulsar created from HDF5 file
-            hasasia_write(f, names_list)
+            #hasasia_write(f, names_list)
             spectra_list_r = hsen_spectra_creation_rrf(freqs=freqs, freqs_gw=freqs, names=names_list, dataset=dataset)
             ng11yr_rrf_sc = hsen.GWBSensitivityCurve(spectra_list_r)
             ng11yr_rrf_dsc = hsen.DeterSensitivityCurve(spectra_list_r)

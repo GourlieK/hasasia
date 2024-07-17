@@ -72,7 +72,7 @@ if __name__ == '__main__':
     mem_data = []
 
     #if data is already saved to folder, comment save_data() out and it will just analyze the data
-    save_data()
+    #save_data()
 
     #grabbing time increments from execution of hasasia_spectrum()
     with open(psrs_name_path + '/psr_increm.txt', 'r') as file:
@@ -125,7 +125,10 @@ if __name__ == '__main__':
 
 
   
-    #grabbing increment data 
+    rrf_handles = []
+    original_handles = []
+
+    # Grabbing increment data and plotting
     for i in range(len(increms)):
         name = increms[i][0] + increms[i][1]
         val_1 = float(increms[i][2])
@@ -133,20 +136,78 @@ if __name__ == '__main__':
         index = np.where((time_data >= val_1) & (time_data <= val_2))
         x_vals = time_data[index]
         y_vals = mem_data[index]
-        plt.plot(x_vals, y_vals, label = name)
-  
-    #plots each pulsar data
+        line, = plt.plot(x_vals, y_vals, label=name)
+        if "RRF" in name:
+            rrf_handles.append(line)
+        else:
+            original_handles.append(line)
+
+    # Plot each pulsar data
     plt.title(f"Memory vs Time of {len(increms)} Pulsars from hasasia_spectrum")
-    plt.xlabel('time [s]')
-    plt.ylabel('RAM memory usage [MB]')
+    plt.xlabel('Time [s]')
+    plt.ylabel('RAM Memory Usage [MB]')
     plt.grid()
-    plt.legend()
-    plt.axhline(y=0, color = 'black')
-    plt.axvline(x = 0, color = 'black')
-    plt.xlim(time_data[0]-1, time_data[-1]+1)
-    plt.savefig(psrs_name_path+'/colored_mem_time.png') 
+    plt.axhline(y=0, color='black')
+    plt.axvline(x=0, color='black')
+    plt.xlim(time_data[0] - 1, time_data[-1] + 1)
+
+    # Create first legend for RRF data
+    first_legend = plt.legend(handles=rrf_handles, loc='upper left', bbox_to_anchor=(-0.18, 1.15))
+
+    # Create second legend for original data
+    second_legend = plt.legend(handles=original_handles, loc='upper right', bbox_to_anchor=(1.12, 1.15))
+
+    # Add the legends to the plot
+    plt.gca().add_artist(first_legend)
+    plt.gca().add_artist(second_legend)
+
+    # Save and show the plot
+    plt.savefig('colored_mem_time.png')
     plt.show()
 
+
+
+    with open(psrs_name_path + '/psr_increm.txt', 'r') as file:
+        OGS = {}
+        RRFS = {}
+        for line in file:
+            parse_line = line.split()
+            if parse_line[0] == 'OG':
+                OGS.update({parse_line[1]: (float(parse_line[3])-float(parse_line[2]))})
+
+            elif parse_line[0] == 'RRF':
+                RRFS.update({parse_line[1]: (float(parse_line[3])-float(parse_line[2]))})
+
+        all_names = OGS.keys()
+        ogs_plot_values = [OGS[name] if name in OGS else 0 for name in all_names]
+        rrfs_plot_values = [RRFS[name] if name in RRFS else 0 for name in all_names]
+
+        # Plotting
+        x = range(len(all_names))
+
+        plt.figure(figsize=(14, 7))
+
+        # Bar width
+        bar_width = 0.4
+
+        # Plot OGS values
+        plt.bar(x, ogs_plot_values, width=bar_width, label='Original', color='blue', align='center')
+
+        # Plot RRFS values (shifted to the right by bar_width)
+        plt.bar([i + bar_width for i in x], rrfs_plot_values, width=bar_width, label='RRF', color='red', align='center')
+
+        # Add names to the x-axis
+        plt.xticks([i + bar_width / 2 for i in x], all_names, rotation=90)
+
+        plt.xlabel('Psrs')
+        plt.ylabel('Time [s]')
+        plt.title('12.5 yr dataset with Thinning of 2')
+        plt.legend(loc='upper right')
+
+        # Show plot
+        plt.tight_layout()
+        plt.savefig(psrs_name_path+'/time_bar.png') 
+        plt.show()
 
 
 
