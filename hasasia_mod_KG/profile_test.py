@@ -1,5 +1,5 @@
 #Kyle Gourlie
-#8/2/2023
+#7/17/2024
 #library imports
 import shutil, h5py
 import gc
@@ -20,7 +20,7 @@ from memory_profiler import profile
 
 
 #Memory Profile File Locations
-path = r'/home/gourliek/Desktop/Profile_Data'
+path = r'~//Profile_Data'
 try:
     os.mkdir(path)
 except FileExistsError:
@@ -198,10 +198,10 @@ def hsen_pulsar_entry(psr, type__, dataset):
     - type__ (str): 'og' XOR 'rrf'
     """
     if type__ == 'og':
-        path = r'/home/gourliek/'+str(dataset)+r'_yr_pulsars_og.hdf5'
+        path = r'~/'+str(dataset)+r'_yr_pulsars_og.hdf5'
 
     elif type__ == 'rrf':
-        path = r'/home/gourliek/'+str(dataset)+r'_yr_pulsars_rrf.hdf5'
+        path = r'~/'+str(dataset)+r'_yr_pulsars_rrf.hdf5'
         
     with h5py.File(path, 'a') as f:
         hdf5_psr = f.create_group(psr.name)
@@ -298,7 +298,7 @@ def hsen_spectra_creation(freqs, names, dataset)->list:
     """
     
     spectras = []
-    path = r'/home/gourliek/'+str(dataset)+r'_yr_pulsars_og.hdf5'
+    path = r'~/'+str(dataset)+r'_yr_pulsars_og.hdf5'
     with h5py.File(path, 'r') as f:
         for name in names:
             start_time = time.time()
@@ -341,7 +341,7 @@ def hsen_spectra_creation_rrf(freqs, freqs_gw, names, dataset)->list:
     Returns:
         - spectras (list): list of Hasasia Spectrum Pulsars
     """
-    path = r'/home/gourliek/'+str(dataset)+r'_yr_pulsars_rrf.hdf5'
+    path = r'~/'+str(dataset)+r'_yr_pulsars_rrf.hdf5'
     spectras = []
     with h5py.File(path, 'r') as f:
         for name in names:
@@ -371,7 +371,9 @@ def hsen_spectra_creation_rrf(freqs, freqs_gw, names, dataset)->list:
             get_NcalInv_RFF_mem.write(f'Pulsar: {name}\n')
             get_NcalInv_RFF_mem.flush()
             NcalInv_time_start = time.time()
-            _ = spec_psr.NcalInv
+            ####
+            _ = spec_psr.NcalInv#.compute()
+            ####
             NcalInv_time_end = time.time()
             end_time = time.time()
             ########################################
@@ -381,129 +383,6 @@ def hsen_spectra_creation_rrf(freqs, freqs_gw, names, dataset)->list:
             time_increments.flush()
             spectras.append(spec_psr)
     return spectras
-
-
-
-
-
-
-
-"""
-@profile(stream=sens_mem_RRF)
-def rrf_array_construction(ePsr, freqs):
-    
-    #benchmark stuff
-    
-    hc_time_start = time.time()
-    start_time = time.time()
-        
-    #creating hasasia pulsar tobject 
-    psr = hsen.Pulsar(toas=ePsr.toas[::thin],
-                        toaerrs=ePsr.toaerrs[::thin],
-                        phi=ePsr.phi,theta=ePsr.theta, 
-                        N=ePsr.N, designmatrix=ePsr.Mmat[::thin,:])
-    
-    
-    #setting name of hasasia pulsar
-    psr.name = ePsr.name
-    #hsen_pulsar_entry(psr, 'og')    _
-    #extra variable needed for benchmarking
-
-    #enterprise pulsar is no longer needed
-    del ePsr
-    print(f"Hasasia Pulsar {psr.name} created\n")
-    #spectra_entry(psr)
-    hc_time_start = time.time()
-    
-    #if red noise parameters for an individual pulsar is present, add it to standard red noise
-    if psr.name in rn_psrs.keys():
-        Amp, gam = rn_psrs[psr.name]
-        #creates spectrum hasasia pulsar to calculate characteristic straing
-        spec_psr = hsen.RRF_Spectrum(psr, amp = Amp, gamma = gam, freqs=freqs)
-        spec_psr.name = psr.name
-    
-    else:
-        #creates spectrum hasasia pulsar to calculate characteristic straing
-        spec_psr = hsen.RRF_Spectrum(psr, freqs=freqs)
-        spec_psr.name = psr.name
-    
-    #hasasia pulsar no longer needed
-    del psr
-
-    hc_time_end = time.time()
-    name = spec_psr.name
-   
-    hc_RRF_time_file.write(f"RRF{name}\t{hc_time_end-hc_time_start}\n")
-
-    print(f"Hasasia Spectrum RRF Pulsar {name} created\n")
-
-    #benchmark stuff
-    end_time = time.time()
-    time_increments.write(f" RRF{name} {start_time-null_time} {end_time-null_time}\n")
-    print('\rPSR RRF {0} complete\n'.format(name),end='',flush=True)
-    
-    return spec_psr
-
-
-
-@profile(stream=sens_mem)
-def array_construction(ePsr, freqs):
-
-    #benchmark stuff
-    get_NcalInv_mem.write(f'Pulsar: {ePsr.name}\n')
-    corr_from_psd_mem.write(f'Pulsar: {ePsr.name}\n')
-    start_time = time.time()
-    #building red noise powerlaw using standard amplitude and gamma
-    plaw = hsen.red_noise_powerlaw(A=9e-16, gamma=13/3., freqs=freqs)
-
-    #if red noise parameters for an individual pulsar is present, add it to standard red noise
-    if ePsr.name in rn_psrs.keys():
-        Amp, gam = rn_psrs[ePsr.name]
-        plaw += hsen.red_noise_powerlaw(A=Amp, gamma=gam, freqs=freqs)  #was +=
-
-    #adding red noise components to the noise covariance matrix via power spectral density
-    ePsr.N += hsen.corr_from_psd(freqs=freqs, psd=plaw,
-                                toas=ePsr.toas[::thin])   
-    
-    #creating hasasia pulsar tobject 
-    psr = hsen.Pulsar(toas=ePsr.toas[::thin],
-                        toaerrs=ePsr.toaerrs[::thin],
-                        phi=ePsr.phi,theta=ePsr.theta, 
-                        N=ePsr.N, designmatrix=ePsr.Mmat[::thin,:])
-    
-    #setting name of hasasia pulsar
-    psr.name = ePsr.name
-    #hsen_pulsar_entry(psr, 'og')
-
-    #enterprise pulsar is no longer needed
-    del ePsr
-    print(f"Hasasia Pulsar {psr.name} created\n")
-
-    #creates spectrum hasasia pulsar to calculate characteristic strain
-    time_hc_start = time.time()
-    spec_psr = hsen.Spectrum(psr, freqs=freqs)
-    spec_psr.name = psr.name
-
-    #hasasia pulsar no longer needed
-    del psr
-    _ = spec_psr.NcalInv
-   
-    time_hc_end = time.time()
-    hc_time_file.write(f"{spec_psr.name}\t{time_hc_end - time_hc_start}\n")
-
-    name = spec_psr.name
-
-    print(f"Hasasia Spectrum Pulsar {name} created\n")
-
-    #benchmark stuff
-    end_time = time.time()
-    time_increments.write(f"{name} {start_time-null_time} {end_time-null_time}\n")
-    print('\rPSR {0} complete\n'.format(name),end='',flush=True)
-
-    return spec_psr
-"""      
-
-
 
 
 def yr_11_data():
@@ -523,11 +402,11 @@ def yr_11_data():
     """
 
     #File Paths
-    pardir = '/home/gourliek/Nanograv/11yr_stochastic_analysis-master/nano11y_data/partim/'
-    timdir = '/home/gourliek/Nanograv/11yr_stochastic_analysis-master/nano11y_data/partim/'
-    noise_dir = '/home/gourliek/Nanograv/11yr_stochastic_analysis-master'
+    pardir = '~/Nanograv/11yr_stochastic_analysis-master/nano11y_data/partim/'
+    timdir = '~/Nanograv/11yr_stochastic_analysis-master/nano11y_data/partim/'
+    noise_dir = '~/Nanograv/11yr_stochastic_analysis-master'
     noise_dir += '/nano11y_data/noisefiles/'
-    psr_list_dir = '/home/gourliek/Nanograv/11yr_stochastic_analysis-master/psrlist.txt'
+    psr_list_dir = '~/Nanograv/11yr_stochastic_analysis-master/psrlist.txt'
 
     #directory name of enterprise hdf5 file
     dataset=11
@@ -574,7 +453,7 @@ def yr_11_data():
            'J2145-0750':[10**-12.6893, 1.32307],
            }
 
-    edir = '/home/gourliek/11_yr_enterprise_pulsars.hdf5'
+    edir = '~/11_yr_enterprise_pulsars.hdf5'
     dataset=11
     
     
@@ -599,7 +478,7 @@ def yr_12_data():
         - enterprise_dir: specific directory name used for enterprise HDF5 file
     """
 
-    data_dir = r'/home/gourliek/Nanograv/12p5yr_stochastic_analysis-master/data/'
+    data_dir = r'~/Nanograv/12p5yr_stochastic_analysis-master/data/'
     par_dir = data_dir + r'par/'
     tim_dir = data_dir + r'tim/'
     noise_file = data_dir + r'channelized_12p5yr_v3_full_noisedict.json' 
@@ -654,7 +533,7 @@ def yr_12_data():
             elif key == gamma_key:
                 rn_psrs[name][1] = noise[gamma_key]
 
-    edir = '/home/gourliek/12_yr_enterprise_pulsars.hdf5'
+    edir = '~/12_yr_enterprise_pulsars.hdf5'
     dataset = 12
     
     return pars, tims, noise, rn_psrs, edir, dataset
@@ -723,7 +602,7 @@ if __name__ == '__main__':
     #max is 34 for 11yr dataset
     #max is 45 for 12yr dataset
     kill_count =  45 
-    thin = 10
+    thin = 2
     ###################################################
     #lists for plotting sensitivity curves
     spectra_list = []
@@ -800,17 +679,16 @@ if __name__ == '__main__':
         stats.print_stats()
      
         #all off by a scaling factor of sqrt(2) ##FIND THE SOURCE
-        plt.loglog(sc_freqs,sc_hc, label='Norm Stoch')
-        plt.loglog(dsc_freqs,dsc_hc, label='Norm Det')
-        plt.loglog(rrf_sc_freqs,rrf_sc_hc, label='RRF Stoch')
-        plt.loglog(rrf_dsc_freqs,rrf_dsc_hc, label='RRF Det')
+        plt.loglog(sc_freqs,sc_hc, label='Norm Stoch', ls='--')
+        plt.loglog(dsc_freqs,dsc_hc, label='Norm Det', ls='--')
+        plt.loglog(rrf_sc_freqs,rrf_sc_hc, label='RRF Stoch', ls=':')
+        plt.loglog(rrf_dsc_freqs,rrf_dsc_hc, label='RRF Det', ls=':')
         plt.ylabel('Characteristic Strain, $h_c$')
         plt.title('NANOGrav 12-year Data Set Sensitivity Curve')
         plt.grid(which='both')
         plt.legend()
         plt.savefig(path+'/GWB_h_c.png')
-        plt.close()
-
+        plt.close()  
 
   
     

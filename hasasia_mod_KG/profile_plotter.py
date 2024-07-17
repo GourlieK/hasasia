@@ -72,7 +72,7 @@ if __name__ == '__main__':
     mem_data = []
 
     #if data is already saved to folder, comment save_data() out and it will just analyze the data
-    #save_data()
+    save_data()
 
     #grabbing time increments from execution of hasasia_spectrum()
     with open(psrs_name_path + '/psr_increm.txt', 'r') as file:
@@ -162,7 +162,7 @@ if __name__ == '__main__':
     plt.gca().add_artist(second_legend)
 
     # Save and show the plot
-    plt.savefig('colored_mem_time.png')
+    plt.savefig(psrs_name_path+'/colored_mem_time.png')
     plt.show()
 
 
