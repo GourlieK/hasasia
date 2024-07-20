@@ -5,15 +5,18 @@ import numpy  as np
 import hasasia, jax
 from functools import cached_property
 jax.config.update("jax_enable_x64", True)
+#turn off GPU
+jax.config.update("jax_platform_name", "cpu")
 import jax.numpy as jnp
-import jax.scipy as jsc
+import jax.scipy as scp
 import itertools as it
 import scipy.stats as sps
 import scipy.linalg as sl
-import os, pickle
+import os, pickle, h5py
 from astropy import units as u
 from enterprise.signals.gp_bases import createfourierdesignmatrix_red
-import dask
+
+
 
 #KG: changed from .utils
 from utils import create_design_matrix

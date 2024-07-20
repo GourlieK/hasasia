@@ -20,7 +20,7 @@ from memory_profiler import profile
 
 
 #Memory Profile File Locations
-path = r'~//Profile_Data'
+path = os.path.expanduser('~/Profile_Data')
 try:
     os.mkdir(path)
 except FileExistsError:
@@ -169,21 +169,22 @@ def enterprise_entry(ePsrs, edir):
     with h5py.File(edir, 'w') as f:
         Tspan_h5 = f.create_dataset('Tspan', (1,), float)
         Tspan_h5[:] = Tspan
-        name_list = np.array(['X' for _ in range(kill_count)], dtype=h5py.string_dtype(encoding='utf-8'))
+        name_list = []
         
-        for i in range(len(ePsrs)): 
-            hdf5_psr = f.create_group(ePsrs[i].name)
-            hdf5_psr.create_dataset('toas', ePsrs[i].toas.shape, ePsrs[i].toas.dtype, data=ePsrs[i].toas)
-            hdf5_psr.create_dataset('toaerrs', ePsrs[i].toaerrs.shape,ePsrs[i].toaerrs.dtype, data=ePsrs[i].toaerrs)
-            hdf5_psr.create_dataset('phi', (1,), float, data=ePsrs[i].phi)
-            hdf5_psr.create_dataset('theta', (1,), float, data=ePsrs[i].theta)
-            hdf5_psr.create_dataset('designmatrix', ePsrs[i].Mmat.shape, ePsrs[i].Mmat.dtype, data=ePsrs[i].Mmat)
-            hdf5_psr.create_dataset('N', ePsrs[i].N.shape, ePsrs[i].N.dtype, data=ePsrs[i].N)
-            hdf5_psr.create_dataset('pdist', (2,), float, data=ePsrs[i].pdist)
-            name_list[i] = ePsrs[i].name
+        for psr in ePsrs:
+            name_list.append(psr.name)
+            hdf5_psr = f.create_group(psr.name)
+            hdf5_psr.create_dataset('toas', psr.toas.shape, psr.toas.dtype, data=psr.toas)
+            hdf5_psr.create_dataset('toaerrs', psr.toaerrs.shape,psr.toaerrs.dtype, data=psr.toaerrs)
+            hdf5_psr.create_dataset('phi', (1,), float, data=psr.phi)
+            hdf5_psr.create_dataset('theta', (1,), float, data=psr.theta)
+            hdf5_psr.create_dataset('designmatrix', psr.Mmat.shape, psr.Mmat.dtype, data=psr.Mmat)
+            hdf5_psr.create_dataset('N', psr.N.shape, psr.N.dtype, data=psr.N)
+            hdf5_psr.create_dataset('pdist', (2,), float, data=psr.pdist)
             f.flush()
-            
-        f.create_dataset('names',data =name_list)
+        
+
+        f.create_dataset('names',data=np.array(name_list, dtype=h5py.string_dtype(encoding='utf-8')))
         del ePsrs[:]
         f.flush()
         gc.collect()
@@ -198,10 +199,10 @@ def hsen_pulsar_entry(psr, type__, dataset):
     - type__ (str): 'og' XOR 'rrf'
     """
     if type__ == 'og':
-        path = r'~/'+str(dataset)+r'_yr_pulsars_og.hdf5'
+        path = os.path.expanduser('~/'+str(dataset)+'_yr_pulsars_og.hdf5')
 
     elif type__ == 'rrf':
-        path = r'~/'+str(dataset)+r'_yr_pulsars_rrf.hdf5'
+        path = os.path.expanduser('~/'+str(dataset)+'_yr_pulsars_rrf.hdf5')
         
     with h5py.File(path, 'a') as f:
         hdf5_psr = f.create_group(psr.name)
@@ -298,7 +299,7 @@ def hsen_spectra_creation(freqs, names, dataset)->list:
     """
     
     spectras = []
-    path = r'~/'+str(dataset)+r'_yr_pulsars_og.hdf5'
+    path = os.path.expanduser('~/'+str(dataset)+'_yr_pulsars_og.hdf5')
     with h5py.File(path, 'r') as f:
         for name in names:
             start_time = time.time()
@@ -341,7 +342,7 @@ def hsen_spectra_creation_rrf(freqs, freqs_gw, names, dataset)->list:
     Returns:
         - spectras (list): list of Hasasia Spectrum Pulsars
     """
-    path = r'~/'+str(dataset)+r'_yr_pulsars_rrf.hdf5'
+    path = os.path.expanduser('~/'+str(dataset)+'_yr_pulsars_rrf.hdf5')
     spectras = []
     with h5py.File(path, 'r') as f:
         for name in names:
@@ -402,11 +403,11 @@ def yr_11_data():
     """
 
     #File Paths
-    pardir = '~/Nanograv/11yr_stochastic_analysis-master/nano11y_data/partim/'
-    timdir = '~/Nanograv/11yr_stochastic_analysis-master/nano11y_data/partim/'
-    noise_dir = '~/Nanograv/11yr_stochastic_analysis-master'
+    pardir = os.path.expanduser('~/Nanograv/11yr_stochastic_analysis-master/nano11y_data/partim/')
+    timdir = os.path.expanduser('~/Nanograv/11yr_stochastic_analysis-master/nano11y_data/partim/')
+    noise_dir = os.path.expanduser('~/Nanograv/11yr_stochastic_analysis-master')
     noise_dir += '/nano11y_data/noisefiles/'
-    psr_list_dir = '~/Nanograv/11yr_stochastic_analysis-master/psrlist.txt'
+    psr_list_dir = os.path.expanduser('~/Nanograv/11yr_stochastic_analysis-master/psrlist.txt')
 
     #directory name of enterprise hdf5 file
     dataset=11
@@ -453,7 +454,7 @@ def yr_11_data():
            'J2145-0750':[10**-12.6893, 1.32307],
            }
 
-    edir = '~/11_yr_enterprise_pulsars.hdf5'
+    edir = os.path.expanduser('~/11_yr_enterprise_pulsars.hdf5')
     dataset=11
     
     
@@ -478,7 +479,7 @@ def yr_12_data():
         - enterprise_dir: specific directory name used for enterprise HDF5 file
     """
 
-    data_dir = r'~/Nanograv/12p5yr_stochastic_analysis-master/data/'
+    data_dir = os.path.expanduser('~/Nanograv/12p5yr_stochastic_analysis-master/data/')
     par_dir = data_dir + r'par/'
     tim_dir = data_dir + r'tim/'
     noise_file = data_dir + r'channelized_12p5yr_v3_full_noisedict.json' 
@@ -533,7 +534,7 @@ def yr_12_data():
             elif key == gamma_key:
                 rn_psrs[name][1] = noise[gamma_key]
 
-    edir = '~/12_yr_enterprise_pulsars.hdf5'
+    edir = os.path.expanduser('~/12_yr_enterprise_pulsars.hdf5')
     dataset = 12
     
     return pars, tims, noise, rn_psrs, edir, dataset
@@ -601,8 +602,8 @@ if __name__ == '__main__':
     ###################################################
     #max is 34 for 11yr dataset
     #max is 45 for 12yr dataset
-    kill_count =  45 
-    thin = 2
+    kill_count =  5
+    thin = 1
     ###################################################
     #lists for plotting sensitivity curves
     spectra_list = []
@@ -618,7 +619,7 @@ if __name__ == '__main__':
         #EITHER SELECT 11 yr or 12 yr
         #pars, tims, noise, rn_psrs, edir, dataset = yr_11_data()
         pars, tims, noise, rn_psrs, edir, dataset = yr_12_data()
-        #ePsrs = enterprise_creation(pars, tims, dataset)
+        ePsrs = enterprise_creation(pars, tims, dataset)
         #exit()
 
         
