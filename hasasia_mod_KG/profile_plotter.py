@@ -65,7 +65,7 @@ def save_data():
 
 if __name__ == '__main__':
     directory  = r'/home/gourliek/hasasia_clone/hasasia_mod_KG'
-    psrs_name_path = r'/home/gourliek/Desktop/Profile_Data'
+    psrs_name_path = os.path.expanduser('~/Profile_Data')
     increms = []
     psrs = []
     time_data = []

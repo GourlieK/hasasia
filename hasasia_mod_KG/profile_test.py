@@ -1,5 +1,5 @@
 #Kyle Gourlie
-#7/17/2024
+#7/21/2024
 #library imports
 import shutil, h5py
 import gc
@@ -55,10 +55,7 @@ import sim as hsim
 import skymap as hsky
 #needed to profile within sensitivity library
 from sensitivity import get_NcalInv_mem, get_NcalInv_RFF_mem, corr_from_psd_mem
-################################################################################################################
-################################################################################################################
-################################################################################################################
-#Important Functions Created from 11-yr tutorial
+
 
 
 class PseudoPulsar:
@@ -195,9 +192,10 @@ def hsen_creation_to_hdf5(ePsr):
     directory = os.path.expanduser('~/hsen_psrs_OG.hdf5')
     #comment this out if hasasia pulsar hdf5 is already computed
     ############################################################
-    #hsen_psr_to_hdf5(psr, directory)
+    hsen_psr_to_hdf5(psr, directory)
     ############################################################
     print(f"Hasasia Pulsar {psr.name} created\n")
+    del psr
     return directory
    
 
@@ -218,9 +216,10 @@ def hsen_creation_to_hdf5_rrf(ePsr):
     directory = os.path.expanduser('~/hsen_psrs_RRF.hdf5')
     ##############################################################
     #comment this out if hasasia pulsar hdf5 is already computed
-    #hsen_psr_to_hdf5(psr, directory)
+    hsen_psr_to_hdf5(psr, directory)
     #############################################################
     print(f"Hasasia RRF Pulsar {psr.name} created\n")
+    del psr
     return directory
 
    
@@ -346,10 +345,6 @@ def yr_11_data():
     noise_dir = os.path.expanduser('~/Nanograv/11yr_stochastic_analysis-master')
     noise_dir += '/nano11y_data/noisefiles/'
     psr_list_dir = os.path.expanduser('~/Nanograv/11yr_stochastic_analysis-master/psrlist.txt')
-
-    #directory name of enterprise hdf5 file
-    dataset=11
-    
 
     #organizes files into alphabetical order
     pars = sorted(glob.glob(pardir+'*.par'))
@@ -506,11 +501,6 @@ def hasasia_write(file, psr_names):
 
 
 
-  
- 
-################################################################################################################
-################################################################################################################
-################################################################################################################
 if __name__ == '__main__':
     null_time = time.time()
     Null_time_file.write(f'{null_time}\n')
@@ -538,14 +528,15 @@ if __name__ == '__main__':
         #EITHER SELECT 11 yr or 12 yr
         #pars, tims, noise, rn_psrs, edir, dataset = yr_11_data()
         pars, tims, noise, rn_psrs, edir, ephem = yr_12_data()
-        #ePsrs = hsen.enterprise_creation(pars, tims, ephem)
-
+        ePsrs = hsen.enterprise_creation(pars, tims, ephem)
+        time.sleep(10)
         #adding white noise covariance matrix
-        #for ePsr in ePsrs:
-        #    ePsr.N = make_corr(ePsr, noise)[::thin,::thin]
-
+        for ePsr in ePsrs:
+            ePsr.N = make_corr(ePsr, noise)[::thin,::thin]
+        time.sleep(10)
         #writes enterprise pulsars to disk
-        #edir = hsen.ent_psr_to_hdf5(ePsrs, edir)
+        edir = hsen.ent_psr_to_hdf5(ePsrs, edir)
+        del ePsrs
         with h5py.File(edir, 'r') as f:
             #memory map to hdf5 file
             Tspan_pt = f['Tspan']

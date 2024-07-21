@@ -7,7 +7,8 @@ from functools import cached_property
 jax.config.update("jax_enable_x64", True)
 #turn off GPU
 jax.config.update("jax_platform_name", "cpu")
-import dask.array as da
+import jax.numpy as jnp
+import jax.scipy.linalg as jsl
 
 import itertools as it
 import scipy.stats as sps
@@ -25,7 +26,7 @@ from utils import create_design_matrix
 #KG: test imports and files
 import time
 from memory_profiler import profile 
-path = r'/home/gourliek/Desktop/Profile_Data'
+path = os.path.expanduser('~/Profile_Data')
 #memory profile for Default NcalInv computation
 get_NcalInv_mem = open(path + '/NcalInv_mem.txt','w')
 #memory profile for Rank Redduced Formalism NcalInv computation
@@ -89,16 +90,16 @@ def R_matrix(designmatrix, N):
     """
     M = designmatrix
     n,m = M.shape
-    L = np.linalg.cholesky(N)
-    Linv = np.linalg.inv(L)
-    U,s,_ = np.linalg.svd(np.matmul(Linv,M), full_matrices=True)
-    Id = np.eye(M.shape[0])
-    S = np.zeros_like(M)
-    S[:m,:m] = np.diag(s)
-    inner = np.linalg.inv(np.matmul(S.T,S))
-    outer = np.matmul(S,np.matmul(inner,S.T))
+    L = jnp.linalg.cholesky(N)
+    Linv = jnp.linalg.inv(L)
+    U,s,_ = jnp.linalg.svd(jnp.matmul(Linv,M), full_matrices=True)
+    Id = jnp.eye(M.shape[0])
+    S = jnp.zeros_like(M)
+    S = S.at[:m,:m].set(jnp.diag(s))
+    inner = jnp.linalg.inv(jnp.matmul(S.T,S))
+    outer = jnp.matmul(S,jnp.matmul(inner,S.T))
 
-    return Id - np.matmul(L,np.matmul(np.matmul(U,outer),np.matmul(U.T,Linv)))
+    return Id - jnp.matmul(L,jnp.matmul(jnp.matmul(U,outer),jnp.matmul(U.T,Linv)))
 
 def G_matrix(designmatrix):
     """
@@ -117,7 +118,7 @@ def G_matrix(designmatrix):
     """
     M = designmatrix
     n , m = M.shape
-    U, _ , _ = np.linalg.svd(M, full_matrices=True)
+    U, _ , _ = jnp.linalg.svd(M, full_matrices=True)
 
     return U[:,m:]
 
@@ -172,8 +173,8 @@ def get_Tf(designmatrix, toas, N=None, nf=200, fmin=None, fmax=2e-7,
     M = designmatrix
     N_TOA = M.shape[0]
     ## Prep Correlation
-    t1, t2 = np.meshgrid(toas, toas)
-    tm = np.abs(t1-t2)
+    t1, t2 = jnp.meshgrid(toas, toas)
+    tm = jnp.abs(t1-t2)
 
     # make filter
     T = toas.max()-toas.min()
@@ -181,34 +182,34 @@ def get_Tf(designmatrix, toas, N=None, nf=200, fmin=None, fmax=2e-7,
     if freqs is None:
         if fmin is None:
             fmin = f0/5
-        ff = np.logspace(np.log10(fmin), np.log10(fmax), nf,dtype='float128')
+        ff = jnp.logspace(jnp.log10(fmin), jnp.log10(fmax), nf,dtype='float128')
         if exact_astro_freqs:
-            ff = np.sort(np.append(ff,[fyr,2*fyr]))
+            ff = jnp.sort(jnp.append(ff,[fyr,2*fyr]))
             nf +=2
     else:
         nf = len(freqs)
         ff = freqs
 
-    Tmat = np.zeros(nf, dtype='float64')
+    Tmat = jnp.zeros(nf, dtype='float64')
     if from_G:
         if Gmatrix is None:
             G = G_matrix(M)
         else:
             G = Gmatrix
         m = G.shape[1]
-        Gtilde = np.zeros((ff.size,G.shape[1]),dtype='complex128')
-        Gtilde = np.dot(np.exp(1j*2*np.pi*ff[:,np.newaxis]*toas),G)
-        Tmat = np.matmul(np.conjugate(Gtilde),Gtilde.T)/N_TOA
+        Gtilde = jnp.zeros((ff.size,G.shape[1]),dtype='complex128')
+        Gtilde = jnp.dot(jnp.exp(1j*2*jnp.pi*ff[:,jnp.newaxis]*toas),G)
+        Tmat = jnp.matmul(jnp.conjugate(Gtilde),Gtilde.T)/N_TOA
         if twofreqs:
-            Tmat = np.real(Tmat)
+            Tmat = jnp.real(Tmat)
         else:
-            Tmat = np.real(np.diag(Tmat))
+            Tmat = jnp.real(jnp.diag(Tmat))
     else:
         R = R_matrix(M, N)
         for ct, f in enumerate(ff):
-            Tmat[ct] = np.real(np.sum(np.exp(1j*2*np.pi*f*tm)*R)/N_TOA)
+            Tmat = Tmat.at[ct].set(jnp.real(jnp.sum(jnp.exp(1j*2*jnp.pi*f*tm)*R)/N_TOA))
 
-    return np.real(Tmat), ff, T
+    return jnp.real(Tmat), ff, T
     
 def resid_response(freqs):
     r"""
@@ -220,7 +221,7 @@ def resid_response(freqs):
 
     .. _[1]: https://arxiv.org/abs/1907.04341
     """
-    return 1/(12 * np.pi**2 * freqs**2)
+    return 1/(12 * jnp.pi**2 * freqs**2)
 
 
 class Pulsar(object):
@@ -263,7 +264,7 @@ class Pulsar(object):
         #for caching
 
         if N is None:
-            self.N = np.diag(toaerrs**2) #N ==> weights
+            self.N = jnp.diag(toaerrs**2) #N ==> weights
         else:
             self.N = N
 
@@ -291,12 +292,12 @@ class Pulsar(object):
         Note that the computation of K_inv will remove the white noise covariance matrix.
         This will have the computation of the Transmission function, get_TfN not possible.
         """
-        L = sl.cholesky(self.N)        
-        A = np.matmul(L,self.G)
+        L = jsl.cholesky(self.N)        
+        A = jnp.matmul(L,self.G)
         del L
-        K = np.matmul(A.T,A)
+        K = jnp.matmul(A.T,A)
         del A
-        return np.linalg.inv(K)
+        return jnp.linalg.inv(K)
 
 
         
@@ -366,11 +367,11 @@ class RRF_Spectrum(object):
             f0 = 1 / get_Tspan([psr])
             if fmin is None:
                 fmin = f0/5
-            self.freqs = np.logspace(np.log10(fmin), np.log10(fmax), nf)
+            self.freqs = jnp.logspace(jnp.log10(fmin), jnp.log10(fmax), nf)
         else:
             self.freqs = freqs
 
-        self._psd_prefit = da.zeros_like(self.freqs)
+        self._psd_prefit = jnp.zeros_like(self.freqs)
 
     def psd_postfit(self):
         """Postfit Residual Power Spectral Density"""
@@ -381,7 +382,7 @@ class RRF_Spectrum(object):
     @property
     def psd_prefit(self):
         """Prefit Residual Power Spectral Density"""
-        if da.all(self._psd_prefit==0):
+        if jnp.all(self._psd_prefit==0):
             raise ValueError('Must set Prefit Residual Power Spectral Density.')
             # print('No Prefit Residual Power Spectral Density set.\n'
             #       'Setting psd_prefit to harmonic mean of toaerrs.')
@@ -408,13 +409,13 @@ class RRF_Spectrum(object):
         nf = len(self.freqs)
         #for pulsars with no red noise power
         if self.gamma == None or self.amp == None:
-            C_rn_inv = da.zeros((2*nf, 2*nf))
+            C_rn_inv = jnp.zeros((2*nf, 2*nf))
         else:
             #creation of fourier coeffiecent covariance matrix, and computes inverse
             C_rn_proto = self.add_red_noise_power(A=self.amp, gamma=self.gamma, vals=True)
-            C_rn_inv = da.zeros((2*nf, 2*nf))
-            C_rn_inv[::2, ::2] = da.diag(1/C_rn_proto)   #odd elements
-            C_rn_inv[1::2, 1::2] = da.diag(1/C_rn_proto) #even elements
+            C_rn_inv = jnp.zeros((2*nf, 2*nf))
+            C_rn_inv = C_rn_inv.at[::2, ::2].set(jnp.diag(1/C_rn_proto))   #odd elements
+            C_rn_inv = C_rn_inv.at[1::2, 1::2].set(jnp.diag(1/C_rn_proto)) #even elements
             del C_rn_proto
         return C_rn_inv
     
@@ -424,16 +425,16 @@ class RRF_Spectrum(object):
         """Gravitational Wave Red Noise Covariance Matrix
         """
         nf = self.freqs.size
-        sub_f = da.zeros(nf)
+        sub_f = jnp.zeros(nf)
 
         # Create a mask for elements in f that are in f_gw
-        mask = da.isin(self.freqs, self.freqs_gw)
-        sub_f[mask] = self.freqs_gw
+        mask = jnp.isin(self.freqs, self.freqs_gw)
+        sub_f = sub_f.at[mask].set(self.freqs_gw)
 
         C_gwb_proto = self.add_red_noise_power(A=self.A_gw, gamma=self.gamma_gw, vals=True, f_gw=sub_f)
-        C_gwb_inv = da.zeros((2*nf, 2*nf))
-        C_gwb_inv[::2, ::2] = da.diag(1/C_gwb_proto)   #odd elements
-        C_gwb_inv[1::2, 1::2] = da.diag(1/C_gwb_proto) #even elements
+        C_gwb_inv = jnp.zeros((2*nf, 2*nf))
+        C_gwb_inv = C_gwb_inv.at[::2, ::2].set(jnp.diag(1/C_gwb_proto))   #odd elements
+        C_gwb_inv = C_gwb_inv.at[1::2, 1::2].set(jnp.diag(1/C_gwb_proto)) #even elements
         del C_gwb_proto
         return C_gwb_inv
 
@@ -461,33 +462,33 @@ class RRF_Spectrum(object):
         #print(np.all(f==self.freqs))
             
         del f   
-        J = da.matmul(self.G.T, F)
+        J = jnp.matmul(self.G.T, F)
         del F
             
-        Z = da.matmul(J.T, self.K_inv)
-        Sigma = da.matmul(Z, J) + self.CirnInv + self.CgwInv
-        SigmaInv = da.linalg.inv(Sigma)
+        Z = jnp.matmul(J.T, self.K_inv)
+        Sigma = jnp.matmul(Z, J) + self.CirnInv + self.CgwInv
+        SigmaInv = jnp.linalg.inv(Sigma)
 
         del J, Sigma
         
-        Gtilde = da.zeros((self.freqs.size,self.G.shape[1]),dtype='complex128')
-        Gtilde = da.dot(da.exp(1j*2*np.pi*self.freqs[:,np.newaxis]*self.toas),self.G)
+        Gtilde = jnp.zeros((self.freqs.size,self.G.shape[1]),dtype='complex128')
+        Gtilde = jnp.dot(jnp.exp(1j*2*jnp.pi*self.freqs[:,jnp.newaxis]*self.toas),self.G)
 
-        _NcalInv_ = (self.K_inv + da.matmul(Z.T, da.matmul(SigmaInv, Z))) / 2#divide by 2 for some reason   
+        _NcalInv_ = (self.K_inv + jnp.matmul(Z.T, jnp.matmul(SigmaInv, Z))) / 2#divide by 2 for some reason   
 
         delattr(self, 'K_inv')
         del SigmaInv, Z
         
         #divided by 4, not 2 for some reason, possibly some normalization stuff
-        TfN = da.matmul(da.conj(Gtilde),da.matmul(_NcalInv_,Gtilde.T)) / 2
-        return da.real(da.diag(TfN)) / T
+        TfN = jnp.matmul(jnp.conj(Gtilde),jnp.matmul(_NcalInv_,Gtilde.T)) / 2
+        return jnp.real(jnp.diag(TfN)) / T
             
                 
     @cached_property
     #@dask.delayed
     def P_n(self):
         """Inverse Noise Weighted Transmission Function."""
-        return da.power(self.NcalInv, -1)
+        return jnp.power(self.NcalInv, -1)
 
     @cached_property
     #@dask.delayed
@@ -518,7 +519,7 @@ class RRF_Spectrum(object):
         .. math::
             h_c=\sqrt{f\;S_I}
         """
-        return da.sqrt(self.freqs * self.S_I)
+        return jnp.sqrt(self.freqs * self.S_I)
 
     @cached_property
     def Omega_gw(self):
@@ -527,7 +528,7 @@ class RRF_Spectrum(object):
         .. math::
             \Omega_{gw}=\frac{2\pi^2}{3\;H_0^2}f^3\;S_I
         """
-        return ((2*np.pi**2/3) * self.freqs**3 * self.S_I
+        return ((2*jnp.pi**2/3) * self.freqs**3 * self.S_I
                            / self._H_0.to('Hz').value**2)
 
     def add_white_noise_power(self, sigma=None, dt=None, vals=False):
@@ -550,7 +551,7 @@ class RRF_Spectrum(object):
             Whether to return the psd values as an array. Otherwise just added
             to `self.psd_prefit`.
         """
-        white_noise = 2.0 * dt * (sigma)**2 * da.ones_like(self.freqs)
+        white_noise = 2.0 * dt * (sigma)**2 * jnp.ones_like(self.freqs)
         self._psd_prefit += white_noise
         if vals:
             return white_noise
@@ -580,7 +581,7 @@ class RRF_Spectrum(object):
             ff = self.freqs
         else:
             ff = f_gw
-        red_noise = A**2*(ff/fyr)**(-gamma)/(12*np.pi**2) * yr_sec**3
+        red_noise = A**2*(ff/fyr)**(-gamma)/(12*jnp.pi**2) * yr_sec**3
         self._psd_prefit += red_noise
         if vals:
             return red_noise
@@ -659,7 +660,7 @@ class Spectrum(object):
     @property
     def psd_prefit(self):
         """Prefit Residual Power Spectral Density"""
-        if np.all(self._psd_prefit==0):
+        if jnp.all(self._psd_prefit==0):
             raise ValueError('Must set Prefit Residual Power Spectral Density.')
             # print('No Prefit Residual Power Spectral Density set.\n'
             #       'Setting psd_prefit to harmonic mean of toaerrs.')
@@ -742,9 +743,9 @@ class Spectrum(object):
             if fmin is None:
                 fmin = f0/5
                 #changed from float128 to float64 due to complex256 being created
-            ff = np.logspace(np.log10(fmin), np.log10(fmax), nf,dtype='float64')
+            ff = jnp.logspace(jnp.log10(fmin), jnp.log10(fmax), nf,dtype='float64')
             if exact_yr_freqs:
-                ff = np.sort(np.append(ff,[fyr,2*fyr]))
+                ff = jnp.sort(jnp.append(ff,[fyr,2*fyr]))
                 nf +=2
         else:
             nf = len(freqs)
@@ -756,34 +757,34 @@ class Spectrum(object):
             else:
                 G = Gmatrix
         else:
-            G = np.eye(toas.size)
+            G = jnp.eye(toas.size)
 
-        Gtilde = np.zeros((ff.size,G.shape[1]),dtype='complex128')
+        Gtilde = jnp.zeros((ff.size,G.shape[1]),dtype='complex128')
         
         #N_freqs x N_TOA-N_par
 
         # Note we do not include factors of NTOA or Timespan as they cancel
         # with the definition of Ncal
-        Gtilde = np.dot(np.exp(1j*2*np.pi*ff[:,np.newaxis]*toas),G)
+        Gtilde = jnp.dot(jnp.exp(1j*2*jnp.pi*ff[:,jnp.newaxis]*toas),G)
         
         # N_freq x N_TOA-N_par
 
-        TfN = np.matmul(np.conjugate(Gtilde),np.matmul(self.K_inv,Gtilde.T)) / 2
+        TfN = jnp.matmul(jnp.conjugate(Gtilde),jnp.matmul(self.K_inv,Gtilde.T)) / 2
 
         if return_Gtilde_Ncal:
-            return np.real(TfN), Gtilde, np.linalg.inv(self.K_inv)
+            return jnp.real(TfN), Gtilde, jnp.linalg.inv(self.K_inv)
         elif full_matrix:
             delattr(self, 'K_inv')
-            return np.real(TfN)
+            return jnp.real(TfN)
         else:
             delattr(self, 'K_inv')
-            return np.real(np.diag(TfN)) / get_Tspan([self])
+            return jnp.real(jnp.diag(TfN)) / get_Tspan([self])
 
     @property
     def P_n(self):
         """Inverse Noise Weighted Transmission Function."""
         if not hasattr(self, '_P_n'):
-            self._P_n = np.power(self.NcalInv(psr=self, freqs=self.freqs,
+            self._P_n = jnp.power(self.NcalInv(psr=self, freqs=self.freqs,
                                              tm_fit=False), -1)
         return self._P_n
 
@@ -820,7 +821,7 @@ class Spectrum(object):
             h_c=\sqrt{f\;S_I}
         """
         if not hasattr(self, '_h_c'):
-            self._h_c = np.sqrt(self.freqs * self.S_I)
+            self._h_c = jnp.sqrt(self.freqs * self.S_I)
         return self._h_c
 
     @property
@@ -830,7 +831,7 @@ class Spectrum(object):
         .. math::
             \Omega_{gw}=\frac{2\pi^2}{3\;H_0^2}f^3\;S_I
         """
-        self._Omega_gw = ((2*np.pi**2/3) * self.freqs**3 * self.S_I
+        self._Omega_gw = ((2*jnp.pi**2/3) * self.freqs**3 * self.S_I
                            / self._H_0.to('Hz').value**2)
         return self._Omega_gw
 
@@ -854,7 +855,7 @@ class Spectrum(object):
             Whether to return the psd values as an array. Otherwise just added
             to `self.psd_prefit`.
         """
-        white_noise = 2.0 * dt * (sigma)**2 * np.ones_like(self.freqs)
+        white_noise = 2.0 * dt * (sigma)**2 * jnp.ones_like(self.freqs)
         self._psd_prefit += white_noise
         if vals:
             return white_noise
@@ -881,7 +882,7 @@ class Spectrum(object):
             to `self.psd_prefit`.
         """
         ff = self.freqs
-        red_noise = A**2*(ff/fyr)**(-gamma)/(12*np.pi**2) * yr_sec**3
+        red_noise = A**2*(ff/fyr)**(-gamma)/(12*jnp.pi**2) * yr_sec**3
         self._psd_prefit += red_noise
         if vals:
             return red_noise
