@@ -345,18 +345,17 @@ class RRF_Spectrum(object):
 
         self.G = psr.G
 
-        #Either will use K_inv or N
-        if hasattr(psr, 'N'):
-            self.N = psr.N
-        else:
-            self.K_inv = psr.K_inv 
+        #only inheriting K_inv, NOT noise covariance matrix
+        self.K_inv = psr.K_inv 
 
         self.designmatrix = psr.designmatrix
         self.pdist = psr.pdist
 
+        #intrinsic red noise parameters
         self.amp = amp
         self.gamma = gamma
 
+        #GWB parameters
         self.A_gw = A_gw
         self.gamma_gw = gamma_gw
         self.freqs_gw = freqs_gw
@@ -420,7 +419,6 @@ class RRF_Spectrum(object):
         return C_rn_inv
     
     @cached_property
-    #@dask.delayed
     def CgwInv(self):
         """Gravitational Wave Red Noise Covariance Matrix
         """
@@ -440,7 +438,6 @@ class RRF_Spectrum(object):
 
     
     @cached_property
-    #@dask.delayed
     @profile(stream = get_NcalInv_RFF_mem)
     def NcalInv(self):
         """_summary_
@@ -476,7 +473,7 @@ class RRF_Spectrum(object):
 
         _NcalInv_ = (self.K_inv + jnp.matmul(Z.T, jnp.matmul(SigmaInv, Z))) / 2#divide by 2 for some reason   
 
-        delattr(self, 'K_inv')
+        #delattr(self, 'K_inv')
         del SigmaInv, Z
         
         #divided by 4, not 2 for some reason, possibly some normalization stuff
@@ -774,10 +771,10 @@ class Spectrum(object):
         if return_Gtilde_Ncal:
             return jnp.real(TfN), Gtilde, jnp.linalg.inv(self.K_inv)
         elif full_matrix:
-            delattr(self, 'K_inv')
+            #delattr(self, 'K_inv')
             return jnp.real(TfN)
         else:
-            delattr(self, 'K_inv')
+            #delattr(self, 'K_inv')
             return jnp.real(jnp.diag(TfN)) / get_Tspan([self])
 
     @property
@@ -1665,63 +1662,45 @@ def enterprise_creation(pars:list, tims:list, ephem:str)->list:
     return ePsrs
 
 
-def ent_psr_to_hdf5(ePsrs:list, edir:str=os.path.expanduser('~/enterprise_psrs.hdf5')) ->str:
-    """## Function that writes list of enterprise.pulsars objects to disk using hdf5 file format. ##
 
-    The data stored within the hdf5 file are the required attributes needed from each enterprise.pulsar object to create a hasasia.pulsar object,
-    along with other important data. The data is organized within the hdf5 file as follows where the type is organized by python type, then hdf5 type:
-    - Tspan (float, dataset): total timespan of the PTA dataset
-    - enterprise.pulsar.name (str, group): name of pulsar, organized as a group within hdf5 file
-    - enterprise.pulsar.toas (numpy.array, dataset of group): array of observatory TOAs in seconds
-    - enterprise.pulsar.toaerrs (numpy.array, dataset of group): array of TOA errors in seconds
-    - enterprise.pulsar.phi (float, dataset of group): azimuthal angle of pulsar in radians
-    - enterprise.pulsar.theta (float, dataset of group): polar angle of pulsar in radians
-    - enterprise.pulsar.Mmat (numpy.array, dataset of group):  ntoa x npar design matrix
-    - enterprise.pulsar.N (numpy.array, dataset of group): Noise covariance matrix, NOT inherited property
-    - names_list (list, dataset): List of pulsar names. Will be used to read from hdf5
+    
+def hsen_psr_to_hdf5(psr:Pulsar, dir:str = os.path.expanduser('~/hsen_psrs.hdf5'))->str:
+    """## Function takes individual hasasia.pulsar objects that writes attributes to disk using hdf5 file format ##
+
+    The data stored within the hdf5 file are the required attributes needed from each hasasia.pulsar object to create a hasasia.spectrum object. 
     
     Args:
-        ePsrs (list): list of enterprise.pulsar objects
-        edir (str, optional): directory to store hdf5 into. Must include name of file. Defaults to 'Home/enterprise_psrs.hdf5'.
+        - psr (Pulsar): Pulsar object
+        - dir (str, optional): directory in which the hdf5 file will be saved under. Needs to include name of file, along with proper hdf5 ending. Defaults to Home/hsen_psrs.hdf5.
 
     Returns:
-        edir (str): directory in which file is stored under
+        - str: directory in which hdf5 will be saved under
     """
-    Tspan = get_Tspan(ePsrs)
-    
-    #required attributes from enterprise.pulsar objects
-    req_attrs = ['toas', 'toaerrs', 'phi', 'theta', 'Mmat', 'N', 'pdist']
 
-    
+    req_attrs = ['name', 'toas', 'toaerrs', 'phi', 'theta', 'designmatrix', 'G', 'K_inv', 'pdist']
+
     failed_psrs = []
-    for ePsr in ePsrs:
-        for attr in req_attrs:
-            if not hasattr(ePsr, attr):
-                failed_psrs.append((ePsr, attr))
+    for attr in req_attrs:
+        if not hasattr(psr, attr):
+            failed_psrs.append((psr, attr))
     
     if len(failed_psrs) != 0:
-        raise Exception(f'The following enterprise.pulsars do not have the required attributes:\n {[failed_attr for failed_attr in failed_psrs]}')
-
-            
+        raise Exception(f'The following pulsar {psr.name} does not have the required attributes:\n {[failed_attr for failed_attr in failed_psrs]}')
+    
     else:
-        name_list = []
-        with h5py.File(edir, 'w') as f:
-            f.create_dataset('Tspan', (1,), float, data=Tspan)
-            for psr in ePsrs:
-                name_list.append(psr.name)
-                hdf5_psr = f.create_group(psr.name)
-                hdf5_psr.create_dataset('toas', psr.toas.shape, psr.toas.dtype, data=psr.toas)
-                hdf5_psr.create_dataset('toaerrs', psr.toaerrs.shape,psr.toaerrs.dtype, data=psr.toaerrs)
-                hdf5_psr.create_dataset('phi', (1,), float, data=psr.phi)
-                hdf5_psr.create_dataset('theta', (1,), float, data=psr.theta)
-                hdf5_psr.create_dataset('designmatrix', psr.Mmat.shape, psr.Mmat.dtype, data=psr.Mmat)
-                hdf5_psr.create_dataset('N', psr.N.shape, psr.N.dtype, data=psr.N)
-                hdf5_psr.create_dataset('pdist', (2,), float, data=psr.pdist)
-                f.flush()
-        
-            f.create_dataset('names',data=np.array(name_list, dtype=h5py.string_dtype(encoding='utf-8')))
+        with h5py.File(dir, 'a') as f:
+            hdf5_psr = f.create_group(psr.name)
+            hdf5_psr.create_dataset('toas', psr.toas.shape, psr.toas.dtype, data=psr.toas)
+            hdf5_psr.create_dataset('toaerrs', psr.toaerrs.shape,psr.toaerrs.dtype, data=psr.toaerrs)
+            hdf5_psr.create_dataset('phi', (1,), float, data=psr.phi)
+            hdf5_psr.create_dataset('theta', (1,), float, data=psr.theta)
+            hdf5_psr.create_dataset('designmatrix', psr.designmatrix.shape, psr.designmatrix.dtype, data=psr.designmatrix)
+            hdf5_psr.create_dataset('G', psr.G.shape, psr.G.dtype, data=psr.G)
+            hdf5_psr.create_dataset('K_inv', psr.K_inv.shape, psr.K_inv.dtype, data=psr.K_inv)
+            hdf5_psr.create_dataset('pdist', (2,), float, data=psr.pdist)
             f.flush()
-        return edir
+
+        return dir
     
     
 
