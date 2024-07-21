@@ -7,14 +7,15 @@ from functools import cached_property
 jax.config.update("jax_enable_x64", True)
 #turn off GPU
 jax.config.update("jax_platform_name", "cpu")
-import jax.numpy as jnp
-import jax.scipy as scp
+import dask.array as da
+
 import itertools as it
 import scipy.stats as sps
 import scipy.linalg as sl
 import os, pickle, h5py
 from astropy import units as u
 from enterprise.signals.gp_bases import createfourierdesignmatrix_red
+from enterprise.pulsar import Pulsar as ePulsar
 
 
 
@@ -221,22 +222,6 @@ def resid_response(freqs):
     """
     return 1/(12 * np.pi**2 * freqs**2)
 
-def get_K_inv(N, G):
-       
-        """
-        K_inv is used later in RREF NcalInv calculation.
-        :math: (G^{T} C_{WN} G)^{-1}
-
-        Note that the computation of K_inv will remove the white noise covariance matrix.
-        This will have the computation of the Transmission function, get_TfN not possible.
-        """
-        L = sl.cholesky(N)        
-        A = jnp.matmul(L,G)
-        del L
-        K = jnp.matmul(A.T,A)
-        del A
-        return np.linalg.inv(K)
-
 
 class Pulsar(object):
     """
@@ -307,9 +292,9 @@ class Pulsar(object):
         This will have the computation of the Transmission function, get_TfN not possible.
         """
         L = sl.cholesky(self.N)        
-        A = jnp.matmul(L,self.G)
+        A = np.matmul(L,self.G)
         del L
-        K = jnp.matmul(A.T,A)
+        K = np.matmul(A.T,A)
         del A
         return np.linalg.inv(K)
 
@@ -348,7 +333,7 @@ class RRF_Spectrum(object):
         Optionally supply an array of frequencies over which to build the
         various spectral densities.
     """
-    def __init__(self, psr, freqs_gw, amp = None, gamma = None, nf=400, fmin=None,
+    def __init__(self, psr, A_gw, gamma_gw, freqs_gw, amp = None, gamma = None, nf=400, fmin=None,
                   fmax=2e-7, freqs=None,  tm_fit=True, **Tf_kwargs):
         self._H_0 = 72 * u.km / u.s / u.Mpc
         self.toas = psr.toas
@@ -370,6 +355,9 @@ class RRF_Spectrum(object):
 
         self.amp = amp
         self.gamma = gamma
+
+        self.A_gw = A_gw
+        self.gamma_gw = gamma_gw
         self.freqs_gw = freqs_gw
 
         self.tm_fit = tm_fit
@@ -382,7 +370,7 @@ class RRF_Spectrum(object):
         else:
             self.freqs = freqs
 
-        self._psd_prefit = np.zeros_like(self.freqs)
+        self._psd_prefit = da.zeros_like(self.freqs)
 
     def psd_postfit(self):
         """Postfit Residual Power Spectral Density"""
@@ -393,7 +381,7 @@ class RRF_Spectrum(object):
     @property
     def psd_prefit(self):
         """Prefit Residual Power Spectral Density"""
-        if np.all(self._psd_prefit==0):
+        if da.all(self._psd_prefit==0):
             raise ValueError('Must set Prefit Residual Power Spectral Density.')
             # print('No Prefit Residual Power Spectral Density set.\n'
             #       'Setting psd_prefit to harmonic mean of toaerrs.')
@@ -414,20 +402,19 @@ class RRF_Spectrum(object):
     
 
     @cached_property
-    #@dask.delayed
     def CirnInv(self):
         """Intrinsic Red Noise Covariance Matrix
         """
         nf = len(self.freqs)
         #for pulsars with no red noise power
         if self.gamma == None or self.amp == None:
-            C_rn_inv = np.zeros((2*nf, 2*nf))
+            C_rn_inv = da.zeros((2*nf, 2*nf))
         else:
             #creation of fourier coeffiecent covariance matrix, and computes inverse
             C_rn_proto = self.add_red_noise_power(A=self.amp, gamma=self.gamma, vals=True)
-            C_rn_inv = np.zeros((2*nf, 2*nf))
-            C_rn_inv[::2, ::2] = np.diag(1/C_rn_proto)   #odd elements
-            C_rn_inv[1::2, 1::2] = np.diag(1/C_rn_proto) #even elements
+            C_rn_inv = da.zeros((2*nf, 2*nf))
+            C_rn_inv[::2, ::2] = da.diag(1/C_rn_proto)   #odd elements
+            C_rn_inv[1::2, 1::2] = da.diag(1/C_rn_proto) #even elements
             del C_rn_proto
         return C_rn_inv
     
@@ -437,16 +424,16 @@ class RRF_Spectrum(object):
         """Gravitational Wave Red Noise Covariance Matrix
         """
         nf = self.freqs.size
-        sub_f = np.zeros(nf)
+        sub_f = da.zeros(nf)
 
         # Create a mask for elements in f that are in f_gw
-        mask = np.isin(self.freqs, self.freqs_gw)
+        mask = da.isin(self.freqs, self.freqs_gw)
         sub_f[mask] = self.freqs_gw
 
-        C_gwb_proto = self.add_red_noise_power(9e-16, gamma=13/3., vals=True, f_gw=sub_f)
-        C_gwb_inv = np.zeros((2*nf, 2*nf))
-        C_gwb_inv[::2, ::2] = np.diag(1/C_gwb_proto)   #odd elements
-        C_gwb_inv[1::2, 1::2] = np.diag(1/C_gwb_proto) #even elements
+        C_gwb_proto = self.add_red_noise_power(A=self.A_gw, gamma=self.gamma_gw, vals=True, f_gw=sub_f)
+        C_gwb_inv = da.zeros((2*nf, 2*nf))
+        C_gwb_inv[::2, ::2] = da.diag(1/C_gwb_proto)   #odd elements
+        C_gwb_inv[1::2, 1::2] = da.diag(1/C_gwb_proto) #even elements
         del C_gwb_proto
         return C_gwb_inv
 
@@ -474,33 +461,33 @@ class RRF_Spectrum(object):
         #print(np.all(f==self.freqs))
             
         del f   
-        J = jnp.matmul(self.G.T, F)
+        J = da.matmul(self.G.T, F)
         del F
             
-        Z = jnp.matmul(J.T, self.K_inv)
-        Sigma = jnp.matmul(Z, J) + self.CirnInv + self.CgwInv
-        SigmaInv = jnp.linalg.inv(Sigma)
+        Z = da.matmul(J.T, self.K_inv)
+        Sigma = da.matmul(Z, J) + self.CirnInv + self.CgwInv
+        SigmaInv = da.linalg.inv(Sigma)
 
         del J, Sigma
         
-        Gtilde = jnp.zeros((self.freqs.size,self.G.shape[1]),dtype='complex128')
-        Gtilde = jnp.dot(jnp.exp(1j*2*jnp.pi*self.freqs[:,jnp.newaxis]*self.toas),self.G)
+        Gtilde = da.zeros((self.freqs.size,self.G.shape[1]),dtype='complex128')
+        Gtilde = da.dot(da.exp(1j*2*np.pi*self.freqs[:,np.newaxis]*self.toas),self.G)
 
-        _NcalInv_ = (self.K_inv + jnp.matmul(Z.T, jnp.matmul(SigmaInv, Z))) / 2#divide by 2 for some reason   
+        _NcalInv_ = (self.K_inv + da.matmul(Z.T, da.matmul(SigmaInv, Z))) / 2#divide by 2 for some reason   
 
         delattr(self, 'K_inv')
         del SigmaInv, Z
         
         #divided by 4, not 2 for some reason, possibly some normalization stuff
-        TfN = jnp.matmul(jnp.conjugate(Gtilde),jnp.matmul(_NcalInv_,Gtilde.T)) / 2
-        return jnp.real(jnp.diag(TfN)) / T
+        TfN = da.matmul(da.conj(Gtilde),da.matmul(_NcalInv_,Gtilde.T)) / 2
+        return da.real(da.diag(TfN)) / T
             
                 
     @cached_property
     #@dask.delayed
     def P_n(self):
         """Inverse Noise Weighted Transmission Function."""
-        return np.power(self.NcalInv, -1)
+        return da.power(self.NcalInv, -1)
 
     @cached_property
     #@dask.delayed
@@ -515,7 +502,6 @@ class RRF_Spectrum(object):
         return 1/resid_response(self.freqs)/self.NcalInv
 
     @cached_property
-    #@dask.delayed
     def S_R(self):
         r"""Residual power sensitivity for this pulsar.
 
@@ -526,17 +512,15 @@ class RRF_Spectrum(object):
         return 1/self.NcalInv
 
     @cached_property
-    #@dask.delayed
     def h_c(self):
         r"""Characteristic strain sensitivity for this pulsar.
 
         .. math::
             h_c=\sqrt{f\;S_I}
         """
-        return np.sqrt(self.freqs * self.S_I)
+        return da.sqrt(self.freqs * self.S_I)
 
     @cached_property
-    #@dask.delayed
     def Omega_gw(self):
         r"""Energy Density sensitivity.
 
@@ -566,7 +550,7 @@ class RRF_Spectrum(object):
             Whether to return the psd values as an array. Otherwise just added
             to `self.psd_prefit`.
         """
-        white_noise = 2.0 * dt * (sigma)**2 * np.ones_like(self.freqs)
+        white_noise = 2.0 * dt * (sigma)**2 * da.ones_like(self.freqs)
         self._psd_prefit += white_noise
         if vals:
             return white_noise
@@ -780,11 +764,11 @@ class Spectrum(object):
 
         # Note we do not include factors of NTOA or Timespan as they cancel
         # with the definition of Ncal
-        Gtilde = jnp.dot(np.exp(1j*2*np.pi*ff[:,np.newaxis]*toas),G)
+        Gtilde = np.dot(np.exp(1j*2*np.pi*ff[:,np.newaxis]*toas),G)
         
         # N_freq x N_TOA-N_par
 
-        TfN = jnp.matmul(np.conjugate(Gtilde),jnp.matmul(self.K_inv,Gtilde.T)) / 2
+        TfN = np.matmul(np.conjugate(Gtilde),np.matmul(self.K_inv,Gtilde.T)) / 2
 
         if return_Gtilde_Ncal:
             return np.real(TfN), Gtilde, np.linalg.inv(self.K_inv)
@@ -1660,3 +1644,83 @@ def nanograv_11yr_stoch():
         sc = pickle.load(fin)
         sc.filepath = path
     return sc
+
+def enterprise_creation(pars:list, tims:list, ephem:str)->list:
+    """## Creates list of enterprise.pulsar objects
+
+    Args:
+        pars (list): list of parameter files
+        tims (list): list of timing files
+        ephem (str): ephemeris
+
+    Returns:
+        list: list of enterprise.pulsar objects
+    """
+    ePsrs = []
+    for par,tim in zip(pars,tims):
+        ePsr = ePulsar(par, tim,  ephem=ephem)
+        ePsrs.append(ePsr)
+        print('\rPSR {0} complete'.format(ePsr.name),end='',flush=True)
+    return ePsrs
+
+
+def ent_psr_to_hdf5(ePsrs:list, edir:str=os.path.expanduser('~/enterprise_psrs.hdf5')) ->str:
+    """## Function that writes list of enterprise.pulsars objects to disk using hdf5 file format. ##
+
+    The data stored within the hdf5 file are the required attributes needed from each enterprise.pulsar object to create a hasasia.pulsar object,
+    along with other important data. The data is organized within the hdf5 file as follows where the type is organized by python type, then hdf5 type:
+    - Tspan (float, dataset): total timespan of the PTA dataset
+    - enterprise.pulsar.name (str, group): name of pulsar, organized as a group within hdf5 file
+    - enterprise.pulsar.toas (numpy.array, dataset of group): array of observatory TOAs in seconds
+    - enterprise.pulsar.toaerrs (numpy.array, dataset of group): array of TOA errors in seconds
+    - enterprise.pulsar.phi (float, dataset of group): azimuthal angle of pulsar in radians
+    - enterprise.pulsar.theta (float, dataset of group): polar angle of pulsar in radians
+    - enterprise.pulsar.Mmat (numpy.array, dataset of group):  ntoa x npar design matrix
+    - enterprise.pulsar.N (numpy.array, dataset of group): Noise covariance matrix, NOT inherited property
+    - names_list (list, dataset): List of pulsar names. Will be used to read from hdf5
+    
+    Args:
+        ePsrs (list): list of enterprise.pulsar objects
+        edir (str, optional): directory to store hdf5 into. Must include name of file. Defaults to 'Home/enterprise_psrs.hdf5'.
+
+    Returns:
+        edir (str): directory in which file is stored under
+    """
+    Tspan = get_Tspan(ePsrs)
+    
+    #required attributes from enterprise.pulsar objects
+    req_attrs = ['toas', 'toaerrs', 'phi', 'theta', 'Mmat', 'N', 'pdist']
+
+    
+    failed_psrs = []
+    for ePsr in ePsrs:
+        for attr in req_attrs:
+            if not hasattr(ePsr, attr):
+                failed_psrs.append((ePsr, attr))
+    
+    if len(failed_psrs) != 0:
+        raise Exception(f'The following enterprise.pulsars do not have the required attributes:\n {[failed_attr for failed_attr in failed_psrs]}')
+
+            
+    else:
+        name_list = []
+        with h5py.File(edir, 'w') as f:
+            f.create_dataset('Tspan', (1,), float, data=Tspan)
+            for psr in ePsrs:
+                name_list.append(psr.name)
+                hdf5_psr = f.create_group(psr.name)
+                hdf5_psr.create_dataset('toas', psr.toas.shape, psr.toas.dtype, data=psr.toas)
+                hdf5_psr.create_dataset('toaerrs', psr.toaerrs.shape,psr.toaerrs.dtype, data=psr.toaerrs)
+                hdf5_psr.create_dataset('phi', (1,), float, data=psr.phi)
+                hdf5_psr.create_dataset('theta', (1,), float, data=psr.theta)
+                hdf5_psr.create_dataset('designmatrix', psr.Mmat.shape, psr.Mmat.dtype, data=psr.Mmat)
+                hdf5_psr.create_dataset('N', psr.N.shape, psr.N.dtype, data=psr.N)
+                hdf5_psr.create_dataset('pdist', (2,), float, data=psr.pdist)
+                f.flush()
+        
+            f.create_dataset('names',data=np.array(name_list, dtype=h5py.string_dtype(encoding='utf-8')))
+            f.flush()
+        return edir
+    
+    
+
