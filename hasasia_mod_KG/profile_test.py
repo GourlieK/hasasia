@@ -722,8 +722,8 @@ if __name__ == '__main__':
     ###################################################
     #max is 34 for 11yr dataset
     #max is 45 for 12yr dataset
-    kill_count =  45 
-    thin = 10
+    kill_count =  3
+    thin = 1
     ###################################################
     #lists for plotting sensitivity curves
     spectra_list = []
@@ -737,8 +737,8 @@ if __name__ == '__main__':
     with cProfile.Profile() as pr:
 
         #EITHER SELECT 11 yr or 12 yr
-        #pars, tims, noise, rn_psrs, edir, dataset = yr_11_data()
-        pars, tims, noise, rn_psrs, edir, dataset = yr_12_data()
+        pars, tims, noise, rn_psrs, edir, dataset = yr_11_data()
+        #pars, tims, noise, rn_psrs, edir, dataset = yr_12_data()
         #ePsrs = enterprise_creation(pars, tims, dataset)
         #exit()
 
@@ -800,10 +800,10 @@ if __name__ == '__main__':
         stats.print_stats()
      
         #all off by a scaling factor of sqrt(2) ##FIND THE SOURCE
-        plt.loglog(sc_freqs,sc_hc, label='Norm Stoch')
-        plt.loglog(dsc_freqs,dsc_hc, label='Norm Det')
-        plt.loglog(rrf_sc_freqs,rrf_sc_hc, label='RRF Stoch')
-        plt.loglog(rrf_dsc_freqs,rrf_dsc_hc, label='RRF Det')
+        plt.loglog(sc_freqs,sc_hc, label='Norm Stoch', c='blue')
+        plt.loglog(dsc_freqs,dsc_hc, label='Norm Det', c='red')
+        plt.loglog(rrf_sc_freqs,rrf_sc_hc, label='RRF Stoch', linestyle='--')
+        plt.loglog(rrf_dsc_freqs,rrf_dsc_hc, label='RRF Det', linestyle='--')
         plt.ylabel('Characteristic Strain, $h_c$')
         plt.title('NANOGrav 12-year Data Set Sensitivity Curve')
         plt.grid(which='both')
