@@ -386,7 +386,7 @@ class RRF_Spectrum(object):
         Optionally supply an array of frequencies over which to build the
         various spectral densities.
     """
-    def __init__(self, psr, freqs_gw, amp = None, gamma = None, nf=400, fmin=None,
+    def __init__(self, psr, freqs_gw, amp_gw, gamma_gw, amp = None, gamma = None, nf=400, fmin=None,
                   fmax=2e-7, freqs=None,  tm_fit=True, **Tf_kwargs):
         self._H_0 = 72 * u.km / u.s / u.Mpc
         self.toas = psr.toas
@@ -396,19 +396,17 @@ class RRF_Spectrum(object):
         self.theta = psr.theta
 
         self.G = psr.G
-
-        #Either will use K_inv or N
-        if hasattr(psr, 'N'):
-            self.N = psr.N
-        else:
-            self.K_inv = psr.K_inv 
+        self.K_inv = psr.K_inv 
 
         self.designmatrix = psr.designmatrix
         self.pdist = psr.pdist
 
         self.amp = amp
         self.gamma = gamma
+
         self.freqs_gw = freqs_gw
+        self.amp_gw = amp_gw
+        self.gamma_gw = gamma_gw
 
         self.tm_fit = tm_fit
         self.Tf_kwargs = Tf_kwargs

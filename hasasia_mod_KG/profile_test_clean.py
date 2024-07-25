@@ -650,3 +650,9 @@ if __name__ == '__main__':
         plt.legend()
         plt.savefig(path+'/sc_h_c.png')
         plt.show()
+                
+                
+
+
+
+            

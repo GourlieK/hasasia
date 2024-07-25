@@ -7,7 +7,7 @@ import numpy  as np
 def save_data():
     dat_list = []
     #tells terminal to do a profile memory analysis of the profile_test module through the terminal
-    command_1 = ["mprof", "run", "profile_test.py"]
+    command_1 = ["mprof", "run", "profile_test_clean.py"]
     #lists the names of all .dat files recently created in order to grab names of each file
     command_2 = ['mprof', 'list']
     #deletes all .dat files created
@@ -61,12 +61,11 @@ def save_data():
 
 
 
-
-
 if __name__ == '__main__':
     directory  = r'/home/gourliek/hasasia_clone/hasasia_mod_KG'
-    psrs_name_path = r'/home/gourliek/Desktop/Profile_Data'
-    increms = []
+    psrs_name_path = os.path.expanduser('~/Desktop/Profile_Data')
+    increms_psrs = []
+    increms_specs = []
     psrs = []
     time_data = []
     mem_data = []
@@ -77,73 +76,72 @@ if __name__ == '__main__':
     #grabbing time increments from execution of hasasia_spectrum()
     with open(psrs_name_path + '/psr_increm.txt', 'r') as file:
         for line in file:
-            line = line.strip('\n')
-            line = line.split()
-            increms.append(line)
+            line = line.strip('\n').split()
+            increms_psrs.append(line)
 
-    #grabbing initial time stamp
-    data = []
-    with open(psrs_name_path + '/Null_time.txt', 'r') as file:
+    with open(psrs_name_path + '/specs_increm.txt', 'r') as file:
         for line in file:
-            line = line.strip('\n')
-            data.append(line)
+            line = line.strip('\n').split()
+            increms_specs.append(line)
 
-    null_time = float(data[0])
-    del data
+    # Grabbing initial timestamp
+    with open(psrs_name_path + '/Null_time.txt', 'r') as file:
+        null_time = float(file.readline().strip('\n'))
 
-                
-    #opening the recently saved data text file
+    # Read time and memory data
     with open(psrs_name_path + '/time_mem_data.txt', 'r') as file:
         for line in file:
-            line = line.strip('\n')
-            line = line.split()
+            line = line.strip('\n').split()
             time_data.append(float(line[0]))
             mem_data.append(float(line[1]))
 
-    #generates random colors based on number of pulsars generated
-    hexadecimal_alphabets = '0123456789ABCDEF'
-    num_colors = len(increms)
-    color = ["#" + ''.join([random.choice(hexadecimal_alphabets) for j in
-    range(6)]) for i in range(num_colors)]
-
-    #made into numpy.arrays so arrays can be filtered out for each pulsar
+    # Convert to numpy arrays
     time_data = np.array(time_data)
     mem_data = np.array(mem_data)
 
+    # Generate random colors
+    hexadecimal_alphabets = '0123456789ABCDEF'
+    num_colors = len(increms_psrs)
+    color = ["#" + ''.join([random.choice(hexadecimal_alphabets) for _ in range(6)]) for _ in range(num_colors)]
 
-    #plots generic 8 pulsars
-    plt.plot(time_data,mem_data, c = 'black')
-    plt.title(f"Memory vs Time of {len(increms)} Pulsars")
+    # Plot generic data for 8 pulsars
+    plt.plot(time_data, mem_data, c='black')
+    plt.title(f"Memory vs Time of {len(increms_psrs)} Pulsars")
     plt.xlabel('time [s]')
     plt.ylabel('RAM memory usage [MB]')
     plt.grid()
-    plt.axhline(y=0, color = 'black')
-    plt.axvline(x = 0, color = 'black')
+    plt.axhline(y=0, color='black')
+    plt.axvline(x=0, color='black')
     plt.xlim(time_data[0]-1, time_data[-1]+1)
-    plt.savefig(psrs_name_path+'/mem_time.png') 
+    plt.savefig(psrs_name_path+'/mem_time.png')
     plt.show()
 
-
-  
-    rrf_handles = []
-    original_handles = []
+    rrf_handles_psr = []
+    original_handles_psr = []
+    rrf_handles_specs = []
+    original_handles_specs = []
 
     # Grabbing increment data and plotting
-    for i in range(len(increms)):
-        name = increms[i][0] + increms[i][1]
-        val_1 = float(increms[i][2])
-        val_2 = float(increms[i][3])
-        index = np.where((time_data >= val_1) & (time_data <= val_2))
-        x_vals = time_data[index]
-        y_vals = mem_data[index]
-        line, = plt.plot(x_vals, y_vals, label=name)
-        if "RRF" in name:
-            rrf_handles.append(line)
-        else:
-            original_handles.append(line)
+    for i in range(len(increms_psrs)):
+        name_psr = increms_psrs[i][0] + increms_psrs[i][1]
+        val_1_psr = float(increms_psrs[i][2])
+        val_2_psr = float(increms_psrs[i][3])
+        
+        
+        index_psr = np.where((time_data >= val_1_psr) & (time_data <= val_2_psr))
+        
 
-    # Plot each pulsar data
-    plt.title(f"Memory vs Time of {len(increms)} Pulsars from hasasia_spectrum")
+        # Plot pulsar data
+        line_psr, = plt.plot(time_data[index_psr], mem_data[index_psr], label=name_psr, color=color[i])
+        if "RRF" in name_psr:
+            rrf_handles_psr.append(line_psr)
+        else:
+            original_handles_psr.append(line_psr)
+            
+        
+
+    # Plot pulsar data
+    plt.title(f"Memory vs Time of {len(increms_psrs)} Pulsars from Pulsar Objects")
     plt.xlabel('Time [s]')
     plt.ylabel('RAM Memory Usage [MB]')
     plt.grid()
@@ -151,36 +149,72 @@ if __name__ == '__main__':
     plt.axvline(x=0, color='black')
     plt.xlim(time_data[0] - 1, time_data[-1] + 1)
 
-    # Create first legend for RRF data
-    first_legend = plt.legend(handles=rrf_handles, loc='upper left', bbox_to_anchor=(-0.18, 1.15))
-
-    # Create second legend for original data
-    second_legend = plt.legend(handles=original_handles, loc='upper right', bbox_to_anchor=(1.12, 1.15))
+    # Create legends
+    first_legend_psr = plt.legend(handles=original_handles_psr, loc='upper left', bbox_to_anchor=(-0.18, 1.15))
+    second_legend_psr = plt.legend(handles=rrf_handles_psr, loc='upper right', bbox_to_anchor=(1.12, 1.15))
 
     # Add the legends to the plot
-    plt.gca().add_artist(first_legend)
-    plt.gca().add_artist(second_legend)
+    plt.gca().add_artist(first_legend_psr)
+    plt.gca().add_artist(second_legend_psr)
 
     # Save and show the plot
-    plt.savefig(psrs_name_path+'/colored_mem_time.png')
+    plt.savefig(psrs_name_path+'/colored_mem_time_psrs.png')
     plt.show()
+    
+
+    for i in range(len(increms_specs)): 
+        name_psr = increms_specs[i][0] + increms_specs[i][1]
+        val_1_spec = float(increms_specs[i][2])
+        val_2_spec = float(increms_specs[i][3])
+
+        index_specs = np.where((time_data >= val_1_spec) & (time_data <= val_2_spec))
+
+        # Plot spectrum data
+        line_specs, = plt.plot(time_data[index_specs], mem_data[index_specs], label=name_psr, color=color[i])
+        if "RRF" in name_psr:
+            rrf_handles_specs.append(line_specs)
+        else:
+            original_handles_specs.append(line_specs)
 
 
+    # Plot spectrum data
+    plt.title(f"Memory vs Time of {len(increms_specs)} Pulsars from Spectrum Objects")
+    plt.xlabel('Time [s]')
+    plt.ylabel('RAM Memory Usage [MB]')
+    plt.grid()
+    plt.axhline(y=0, color='black')
+    plt.axvline(x=0, color='black')
+    plt.xlim(time_data[0] - 1, time_data[-1] + 1)
 
+    # Create legends
+    first_legend_specs = plt.legend(handles=original_handles_specs, loc='upper left', bbox_to_anchor=(-0.18, 1.15))
+    second_legend_specs = plt.legend(handles=rrf_handles_specs, loc='upper right', bbox_to_anchor=(1.12, 1.15))
+
+    # Add the legends to the plot
+    plt.gca().add_artist(first_legend_specs)
+    plt.gca().add_artist(second_legend_specs)
+
+    # Save and show the plot
+    plt.savefig(psrs_name_path+'/colored_mem_time_specs.png')
+    plt.show()
+    plt.close()
+
+
+    #bar chart for hasasia pulsar time
     with open(psrs_name_path + '/psr_increm.txt', 'r') as file:
-        OGS = {}
-        RRFS = {}
+        OGS_psrs = {}
+        RRFS_psrs = {}
         for line in file:
             parse_line = line.split()
             if parse_line[0] == 'OG':
-                OGS.update({parse_line[1]: (float(parse_line[3])-float(parse_line[2]))})
+                OGS_psrs.update({parse_line[1]: (float(parse_line[3])-float(parse_line[2]))})
 
             elif parse_line[0] == 'RRF':
-                RRFS.update({parse_line[1]: (float(parse_line[3])-float(parse_line[2]))})
+                RRFS_psrs.update({parse_line[1]: (float(parse_line[3])-float(parse_line[2]))})
 
-        all_names = OGS.keys()
-        ogs_plot_values = [OGS[name] if name in OGS else 0 for name in all_names]
-        rrfs_plot_values = [RRFS[name] if name in RRFS else 0 for name in all_names]
+        all_names = OGS_psrs.keys()
+        ogs_plot_values_psrs = [OGS_psrs[name] if name in OGS_psrs else 0 for name in all_names]
+        rrfs_plot_values_psrs = [RRFS_psrs[name] if name in RRFS_psrs else 0 for name in all_names]
 
         # Plotting
         x = range(len(all_names))
@@ -191,23 +225,99 @@ if __name__ == '__main__':
         bar_width = 0.4
 
         # Plot OGS values
-        plt.bar(x, ogs_plot_values, width=bar_width, label='Original', color='blue', align='center')
+        plt.bar(x, ogs_plot_values_psrs, width=bar_width, label='Original', color='blue', align='center')
 
         # Plot RRFS values (shifted to the right by bar_width)
-        plt.bar([i + bar_width for i in x], rrfs_plot_values, width=bar_width, label='RRF', color='red', align='center')
+        plt.bar([i + bar_width for i in x], rrfs_plot_values_psrs, width=bar_width, label='RRF', color='red', align='center')
 
         # Add names to the x-axis
         plt.xticks([i + bar_width / 2 for i in x], all_names, rotation=90)
 
         plt.xlabel('Psrs')
         plt.ylabel('Time [s]')
-        plt.title('12.5 yr dataset with Thinning of 2')
+        plt.title('Time to Create Pulsar Objects')
         plt.legend(loc='upper right')
 
         # Show plot
         plt.tight_layout()
-        plt.savefig(psrs_name_path+'/time_bar.png') 
+        plt.savefig(psrs_name_path+'/time_bar_psrs.png') 
         plt.show()
+
+
+        #bar chart for hasasia spectrum time
+        with open(psrs_name_path + '/specs_increm.txt', 'r') as file:
+            OGS_specs = {}
+            RRFS_specs = {}
+            for line in file:
+                parse_line = line.split()
+                if parse_line[0] == 'OG':
+                    OGS_specs.update({parse_line[1]: (float(parse_line[3])-float(parse_line[2]))})
+
+                elif parse_line[0] == 'RRF':
+                    RRFS_specs.update({parse_line[1]: (float(parse_line[3])-float(parse_line[2]))})
+
+            all_names = OGS_specs.keys()
+            ogs_plot_values_specs = [OGS_specs[name] if name in OGS_specs else 0 for name in all_names]
+            rrfs_plot_values_specs = [RRFS_specs[name] if name in RRFS_specs else 0 for name in all_names]
+
+            # Plotting
+            x = range(len(all_names))
+
+            plt.figure(figsize=(14, 7))
+
+            # Bar width
+            bar_width = 0.4
+
+            # Plot OGS values
+            plt.bar(x, ogs_plot_values_specs, width=bar_width, label='Original', color='blue', align='center')
+
+            # Plot RRFS values (shifted to the right by bar_width)
+            plt.bar([i + bar_width for i in x], rrfs_plot_values_specs, width=bar_width, label='RRF', color='red', align='center')
+
+            # Add names to the x-axis
+            plt.xticks([i + bar_width / 2 for i in x], all_names, rotation=90)
+
+            plt.xlabel('Psrs')
+            plt.ylabel('Time [s]')
+            plt.title('Time to Create Spectrum Objects')
+            plt.legend(loc='upper right')
+
+            # Show plot
+            plt.tight_layout()
+            plt.savefig(psrs_name_path+'/time_bar_specs.png') 
+            plt.show()
+
+
+        #bar chart for total time
+        og_psrs_tm = np.array(ogs_plot_values_psrs)
+        rrf_psrs_tm = np.array(rrfs_plot_values_psrs)
+
+        og_specs_tm = np.array(ogs_plot_values_specs)
+        rrf_specs_tm = np.array(rrfs_plot_values_specs)
+
+        total_og_tm = og_psrs_tm + og_specs_tm
+        total_rrf_tm = rrf_psrs_tm + rrf_specs_tm
+        x = range(len(all_names))
+
+        plt.figure(figsize=(14, 7))
+        bar_width = 0.4
+        plt.bar(x, total_og_tm, width=bar_width, label='Original', color='blue', align='center')
+        plt.bar([i + bar_width for i in x], total_rrf_tm, width=bar_width, label='RRF', color='red', align='center')
+
+        # Add names to the x-axis
+        plt.xticks([i + bar_width / 2 for i in x], all_names, rotation=90)
+
+        plt.xlabel('Psrs')
+        plt.ylabel('Time [s]')
+        plt.title('Total Time')
+        plt.legend(loc='upper right')
+
+        # Show plot
+        plt.tight_layout()
+        plt.savefig(psrs_name_path+'/time_bar_total.png') 
+        plt.show()
+
+
 
 
 
