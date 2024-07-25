@@ -477,7 +477,7 @@ class RRF_Spectrum(object):
         mask = np.isin(self.freqs, self.freqs_gw)
         sub_f[mask] = self.freqs_gw
 
-        C_gwb_proto = self.add_red_noise_power(9e-16, gamma=13/3., vals=True, f_gw=sub_f)
+        C_gwb_proto = self.add_red_noise_power(A=self.amp_gw, gamma=self.gamma_gw, vals=True, f_gw=sub_f)
         C_gwb_inv = np.zeros((2*nf, 2*nf))
         C_gwb_inv[::2, ::2] = np.diag(1/C_gwb_proto)   #odd elements
         C_gwb_inv[1::2, 1::2] = np.diag(1/C_gwb_proto) #even elements
