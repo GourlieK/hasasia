@@ -334,11 +334,11 @@ def hsen_spectrum_creation_rrf(pseudo:PseudoSpectraPulsar, gam_gw:float, amp_gw:
     if pseudo.name in rn_psrs.keys():
         Amp, gam = rn_psrs[pseudo.name]
         #creates spectrum hasasia pulsar to calculate characteristic straing
-        spec_psr = hsen.RRF_Spectrum(psr=pseudo, freqs_gw=freqs,amp_gw=amp_gw, gamma_gw=gam_gw, amp = Amp, gamma = gam, freqs=freqs)
+        spec_psr = hsen.RRF_Spectrum(psr=pseudo, freqs_gw=freqs_gw,amp_gw=amp_gw, gamma_gw=gam_gw, amp = Amp, gamma = gam, freqs=freqs)
     
     else:
         #creates spectrum hasasia pulsar to calculate characteristic straing
-        spec_psr = hsen.RRF_Spectrum(pseudo, freqs=freqs, freqs_gw=freqs,amp_gw=amp_gw, gamma_gw=gam_gw)
+        spec_psr = hsen.RRF_Spectrum(pseudo, freqs=freqs, freqs_gw=freqs_gw,amp_gw=amp_gw, gamma_gw=gam_gw)
     
     spec_psr.name = pseudo.name
     
@@ -541,12 +541,13 @@ if __name__ == '__main__':
     ###################################################
     #max is 34 for 11yr dataset
     #max is 45 for 12yr dataset
-    kill_count =  45
-    num_chains = 50
+    kill_count =  3
+    num_chains = 1000
     thin = 5
     #yr used for making WN correlation matrix, specifically when yr=15
     yr=12
     fyr = 1/(365.25*24*3600)
+    obs_freq_num = 30
     #GWB parameters
     
 
@@ -567,7 +568,8 @@ if __name__ == '__main__':
             #reading Tspan and creation of frequencies to observe
             Tspan = f['Tspan'][:][0]
             freqs = np.logspace(np.log10(1/(5*Tspan)),np.log10(2e-7),200)
-
+            freqs_gw = np.arange(1/Tspan, (obs_freq_num+1)/Tspan, 1/Tspan)
+        
             #reading names encoded as bytes, and re-converting them to strings, and deleting byte names
             names = f['names'][:]
             for i in range(kill_count):
@@ -631,14 +633,13 @@ if __name__ == '__main__':
         #plotting sensitivity curves
         plt.title(f'NANOGrav {yr}-year Data Set Sensitivity Curve')
         for i in range(num_chains):
-            plt.loglog(rrf_sc_freqs_total[i],rrf_sc_hc_total[i], color='k', label='RRF Stoch', lw=0.2)
-            plt.loglog(rrf_dsc_freqs_total[i],rrf_dsc_hc_total[i], color='k', label='RRF Det', lw=0.2)
-            print(i)
-       
+            plt.loglog(rrf_sc_freqs_total[i],rrf_sc_hc_total[i],  label='RRF Stoch', lw=0.2)
+            plt.loglog(rrf_dsc_freqs_total[i],rrf_dsc_hc_total[i], label='RRF Det', lw=0.2)
+            
         plt.xlabel('Frequencies, Hz')
         plt.ylabel('Characteristic Strain, $h_c$')
         plt.grid(which='both')
-        plt.legend()
+        #plt.legend()
         plt.savefig(path+'/sc_h_c.png')
         plt.show()
 
