@@ -205,7 +205,7 @@ def hsen_pulsar_creation(pseudo:PseudoPulsar, hsen_dir:str):
         hsen_dir (str): directory for storing hasasia pulsar object
     """
     start_time = time.time()
-    plaw = hsen.red_noise_powerlaw(A=A_gw, gamma=gam_gw, freqs=freqs)
+    plaw = hsen.red_noise_powerlaw(A=0, gamma=0, freqs=freqs)
 
     #if red noise parameters for an individual pulsar is present, add it to standard red noise
     if pseudo.name in rn_psrs.keys():
@@ -330,11 +330,11 @@ def hsen_spectrum_creation_rrf(pseudo:PseudoSpectraPulsar)-> hsen.RRF_Spectrum:
     if pseudo.name in rn_psrs.keys():
         Amp, gam = rn_psrs[pseudo.name]
         #creates spectrum hasasia pulsar to calculate characteristic straing
-        spec_psr = hsen.RRF_Spectrum(psr=pseudo, freqs_gw=freqs,amp_gw=Amp, gamma_gw=gam_gw, amp = Amp, gamma = gam, freqs=freqs)
+        spec_psr = hsen.RRF_Spectrum(psr=pseudo, freqs_gw=freqs_rn,amp_gw=A_gw, gamma_gw=gam_gw, amp = Amp, gamma = gam, freqs=freqs)
     
     else:
         #creates spectrum hasasia pulsar to calculate characteristic straing
-        spec_psr = hsen.RRF_Spectrum(pseudo, freqs=freqs, freqs_gw=freqs,amp_gw=Amp, gamma_gw=gam_gw)
+        spec_psr = hsen.RRF_Spectrum(pseudo, freqs=freqs, freqs_gw=freqs_rn,amp_gw=A_gw, gamma_gw=gam_gw)
     
     spec_psr.name = pseudo.name
 
@@ -535,7 +535,7 @@ if __name__ == '__main__':
     ###################################################
     #max is 34 for 11yr dataset
     #max is 45 for 12yr dataset
-    kill_count =  45
+    kill_count =  3
     num_chains = 5
     thin = 5
     #yr used for making WN correlation matrix, specifically when yr=15
@@ -553,15 +553,16 @@ if __name__ == '__main__':
         pars, tims, noise, rn_psrs, edir, ephem = yr_12_data()
         
         #enterprise pulsars creation, disk write, and deletion
-        ePsrs = enterprise_creation(pars, tims, ephem)
-        enterprise_hdf5(ePsrs, noise, yr, edir, thin)
-        del ePsrs
+        #ePsrs = enterprise_creation(pars, tims, ephem)
+        #enterprise_hdf5(ePsrs, noise, yr, edir, thin)
+        #del ePsrs
 
         #reading hdf5 file containing enterprise.pulsar attributes
         with h5py.File(edir, 'r') as f:
             #reading Tspan and creation of frequencies to observe
             Tspan = f['Tspan'][:][0]
             freqs = np.logspace(np.log10(1/(5*Tspan)),np.log10(2e-7),200)
+            freqs_rn = np.arange(1/Tspan, 31/Tspan, 1/Tspan)
 
             #reading names encoded as bytes, and re-converting them to strings, and deleting byte names
             names = f['names'][:]
@@ -572,13 +573,13 @@ if __name__ == '__main__':
             #Original Method for creation of hasasia pulsars, and saving them to hdf5 file
             hsen_dir = os.path.expanduser('~/hsen_psrs.hdf5')
             #comment this out if pulsars were already saved to hdf5 file
-            hsen_pulsr_hdf5_entire(f, names_list, hsen_dir)
+           # hsen_pulsr_hdf5_entire(f, names_list, hsen_dir)
                 
                 
             #Rank-Reduced Method for creation of hasasia pulsars, and saving them to hdf5 file
             hsen_dir_rrf = os.path.expanduser('~/hsen_psrs_rrf.hdf5')
             #comment this out if pulsars were already saved to hdf5 file
-            hsen_rrf_pulsar_hdf5_entire(f, names_list, hsen_dir_rrf)
+            #hsen_rrf_pulsar_hdf5_entire(f, names_list, hsen_dir_rrf)
                 
         
         #gw_log10_A_samples, gw_gam_samples = chains_puller(num_chains)

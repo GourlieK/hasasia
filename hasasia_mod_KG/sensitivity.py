@@ -450,39 +450,45 @@ class RRF_Spectrum(object):
     
 
     @cached_property
-    def CirnInv(self):
+    def Cirn(self):
         """Intrinsic Red Noise Covariance Matrix
         """
-        nf = len(self.freqs)
-        #for pulsars with no red noise power
-        if self.gamma == None or self.amp == None:
-            C_rn_inv = np.zeros((2*nf, 2*nf))
-        else:
-            #creation of fourier coeffiecent covariance matrix, and computes inverse
-            C_rn_proto = self.add_red_noise_power(A=self.amp, gamma=self.gamma, vals=True)
-            C_rn_inv = np.zeros((2*nf, 2*nf))
-            C_rn_inv[::2, ::2] = np.diag(1/C_rn_proto)   #odd elements
-            C_rn_inv[1::2, 1::2] = np.diag(1/C_rn_proto) #even elements
-            del C_rn_proto
-        return C_rn_inv
-    
-    @cached_property
-    def CgwInv(self):
-        """Gravitational Wave Red Noise Covariance Matrix
-        """
-        nf = self.freqs.size
-        sub_f = np.zeros(nf)
+        nf =  self.freqs_gw.size
+        #sub_f = np.zeros(nf)
 
         # Create a mask for elements in f that are in f_gw
-        mask = np.isin(self.freqs, self.freqs_gw)
-        sub_f[mask] = self.freqs_gw
+        #mask = np.isin(self.freqs, self.freqs_gw)
 
-        C_gwb_proto = self.add_red_noise_power(9e-16, gamma=13/3., vals=True, f_gw=sub_f)
-        C_gwb_inv = np.zeros((2*nf, 2*nf))
-        C_gwb_inv[::2, ::2] = np.diag(1/C_gwb_proto)   #odd elements
-        C_gwb_inv[1::2, 1::2] = np.diag(1/C_gwb_proto) #even elements
+        #sub_f[mask] = self.freqs_gw
+        #for pulsars with no red noise power
+        if self.gamma == None or self.amp == None:
+            C_rn = np.zeros((2*nf, 2*nf))
+        else:
+            #creation of fourier coeffiecent covariance matrix, and computes inverse
+            C_rn_proto = self.add_red_noise_power(A=self.amp, gamma=self.gamma, vals=True, f_gw=self.freqs_gw)
+            C_rn = np.zeros((2*nf, 2*nf))
+            C_rn[::2, ::2] = np.diag(C_rn_proto)   #odd elements
+            C_rn[1::2, 1::2] = np.diag(C_rn_proto) #even elements
+            del C_rn_proto
+        return C_rn
+    
+    @cached_property
+    def Cgw(self):
+        """Gravitational Wave Red Noise Covariance Matrix
+        """
+        nf = self.freqs_gw.size
+        #sub_f = np.zeros(nf)
+
+        # Create a mask for elements in f that are in f_gw
+        #mask = np.isin(self.freqs, self.freqs_gw)
+        #sub_f[mask] = self.freqs_gw
+
+        C_gwb_proto = self.add_red_noise_power(A=self.amp_gw, gamma=self.gamma_gw, vals=True, f_gw=self.freqs_gw)
+        C_gwb = np.zeros((2*nf, 2*nf))
+        C_gwb[::2, ::2] = np.diag(C_gwb_proto)   #odd elements
+        C_gwb[1::2, 1::2] = np.diag(C_gwb_proto) #even elements
         del C_gwb_proto
-        return C_gwb_inv
+        return C_gwb
 
     
     @cached_property
@@ -498,37 +504,38 @@ class RRF_Spectrum(object):
             _type_: _description_
         """
         #Defining Ncal and NcalInv depending on existence of self.N or self.K_inv
-        nf = len(self.freqs)
+        nf = self.freqs_gw.size
         N = len(self.toas)
         T = self.toas.max()-self.toas.min()
         
         #Fourier Design matrix
         F  = jnp.zeros((N, 2 * nf))
         f = jnp.arange(1, nf + 1) / T
-        F = F.at[:, ::2].set(jnp.sin(2 * jnp.pi * self.toas[:, None] * f[None, :]))
-        F = F.at[:, 1::2].set(jnp.cos(2 * jnp.pi * self.toas[:, None] * f[None, :]))
+        F = F.at[:, ::2].set(jnp.sin(2 * jnp.pi * self.toas[:, None] * f[None, :])) 
+        F = F.at[:, 1::2].set(jnp.cos(2 * jnp.pi * self.toas[:, None] * f[None, :])) 
         del f   
         J = jnp.matmul(self.G.T, F)
         del F
-            
+        
+        phi = self.Cgw + self.Cgw
+        phi_inv = jnp.linalg.inv(phi)
+        del phi
+
         Z = jnp.matmul(J.T, self.K_inv)
-        Sigma = jnp.matmul(Z, J) + self.CirnInv + self.CgwInv
+        Sigma = (phi_inv + jnp.matmul(Z, J)).T
         SigmaInv = jnp.linalg.inv(Sigma)
-
-
-        del J, Sigma
         
         Gtilde = jnp.zeros((self.freqs.size,self.G.shape[1]),dtype='complex128')
         Gtilde = jnp.dot(jnp.exp(1j*2*jnp.pi*self.freqs[:,jnp.newaxis]*self.toas),self.G)
 
-        NcalInv = (self.K_inv + jnp.matmul(Z.T, jnp.matmul(SigmaInv, Z))) / 2#divide by 2 for some reason   
+        NcalInv_ = self.K_inv + jnp.matmul(Z.T, jnp.matmul(SigmaInv, Z))#divide by 2 for some reason   
 
         del SigmaInv, Z, self.K_inv
         #divided by 4, not 2 for some reason, possibly some normalization stuff
-        TfN = jnp.matmul(jnp.conjugate(Gtilde),jnp.matmul(NcalInv,Gtilde.T)) / 2
+        TfN = jnp.matmul(jnp.conjugate(Gtilde),jnp.matmul(NcalInv_,Gtilde.T))
 
         if return_Gtilde_Ncal:
-            return jnp.real(TfN), Gtilde, jnp.linalg.inv(NcalInv)
+            return jnp.real(TfN), Gtilde, jnp.linalg.inv(NcalInv_)
         elif full_matrix:
             return jnp.real(TfN)
         else:
@@ -640,7 +647,6 @@ class RRF_Spectrum(object):
         else:
             ff = f_gw
         red_noise = A**2*(ff/fyr)**(-gamma)/(12*np.pi**2) * yr_sec**3
-        self._psd_prefit += red_noise
         if vals:
             return red_noise
 
@@ -799,7 +805,6 @@ class Spectrum(object):
             NcalInv= np.linalg.inv(Ncal)
         else:
             NcalInv = self.K_inv 
-
         toas = self.toas
         freqs = self.freqs
         Gmatrix = self.G

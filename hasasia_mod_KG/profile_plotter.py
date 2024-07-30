@@ -7,7 +7,7 @@ import numpy  as np
 def save_data():
     dat_list = []
     #tells terminal to do a profile memory analysis of the profile_test module through the terminal
-    command_1 = ["mprof", "run", "profile_test_clean.py"]
+    command_1 = ["mprof", "run", "profile_test.py"]
     #lists the names of all .dat files recently created in order to grab names of each file
     command_2 = ['mprof', 'list']
     #deletes all .dat files created
