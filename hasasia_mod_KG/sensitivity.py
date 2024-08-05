@@ -223,45 +223,21 @@ def resid_response(freqs):
     return 1/(12 * np.pi**2 * freqs**2)
 
 
-
-def get_NcalInv_RRF(K_inv: jax.Array, G: jax.Array, CgwInv:jax.Array, 
-                    CirnInv:jax.Array, freqs:jax.Array, toas:jax.Array,   full_matrix=False, return_Gtilde_Ncal=False):
-    """_summary_
-
-    Args:
-        full_matrix (bool, optional): _description_. Defaults to False.
-        return_Gtilde_Ncal (bool, optional): _description_. Defaults to False.
-
-    Returns:, 
-        _type_: _description_
-    """
-    #Defining Ncal and NcalInv depending on existence of self.N or self.K_inv
-    nf = len(freqs)
-    N = len(toas)
+#@functools.partial(jax.jit, static_argnames=['full_matrix', 'return_Gtilde_Ncal'])
+def get_NcalInv_RRF(K_inv: jax.Array, G: jax.Array, phi:jax.Array, J: jax.Array,
+                    Z: jax.Array, freqs: jax.Array, toas:jax.Array, full_matrix=False, return_Gtilde_Ncal=False):
     T = toas.max()-toas.min()
-      
-    #Fourier Design matrix
-    F  = jnp.zeros((N, 2 * nf))
-    f = jnp.arange(1, nf + 1) / T
-    F = F.at[:, ::2].set(jnp.sin(2 * jnp.pi * toas[:, None] * f[None, :]))
-    F = F.at[:, 1::2].set(jnp.cos(2 * jnp.pi * toas[:, None] * f[None, :]))
-    del f   
-    J = jnp.matmul(G.T, F)
-    del F
-        
-    Z = jnp.matmul(J.T, K_inv)
-    Sigma = jnp.matmul(Z, J) + CirnInv + CgwInv
+    Sigma = jnp.matmul(Z, J) + jnp.linalg.inv(phi)
     SigmaInv = jnp.linalg.inv(Sigma)
 
-
-    del J, Sigma
+    del Sigma, phi
     
     Gtilde = jnp.zeros((freqs.size,G.shape[1]),dtype='complex128')
     Gtilde = jnp.dot(jnp.exp(1j*2*jnp.pi*freqs[:,jnp.newaxis]*toas),G)
 
     NcalInv = (K_inv + jnp.matmul(Z.T, jnp.matmul(SigmaInv, Z))) / 2#divide by 2 for some reason   
 
-    del SigmaInv, Z, K_inv
+    del SigmaInv, K_inv
     #divided by 4, not 2 for some reason, possibly some normalization stuff
     TfN = jnp.matmul(jnp.conjugate(Gtilde),jnp.matmul(NcalInv,Gtilde.T)) / 2
 
@@ -271,7 +247,6 @@ def get_NcalInv_RRF(K_inv: jax.Array, G: jax.Array, CgwInv:jax.Array,
         return jnp.real(TfN)
     else:
         return jnp.real(jnp.diag(TfN)) / T
-
 
 
 class Pulsar(object):
@@ -459,7 +434,7 @@ class RRF_Spectrum(object):
             C_rn = np.zeros((2*nf, 2*nf))
         else:
             #creation of fourier coeffiecent covariance matrix, and computes inverse
-            C_rn_proto = self.add_red_noise_power(A=self.amp, gamma=self.gamma, vals=True, f_gw=self.freqs_gw)
+            C_rn_proto = red_noise_powerlaw(A=self.amp, gamma=self.gamma, freqs=self.freqs_gw)
             C_rn = np.zeros((2*nf, 2*nf))
             C_rn[::2, ::2] = np.diag(C_rn_proto)   #odd elements
             C_rn[1::2, 1::2] = np.diag(C_rn_proto) #even elements
@@ -471,12 +446,31 @@ class RRF_Spectrum(object):
         """Gravitational Wave Red Noise Covariance Matrix
         """
         nf = self.freqs_gw.size
-        C_gwb_proto = self.add_red_noise_power(A=self.amp_gw, gamma=self.gamma_gw, vals=True, f_gw=self.freqs_gw)
+        C_gwb_proto = red_noise_powerlaw(A=self.amp_gw, gamma=self.gamma_gw, freqs=self.freqs_gw)
         C_gwb = np.zeros((2*nf, 2*nf))
         C_gwb[::2, ::2] = np.diag(C_gwb_proto)   #odd elements
         C_gwb[1::2, 1::2] = np.diag(C_gwb_proto) #even elements
         del C_gwb_proto
         return C_gwb
+    
+    @cached_property
+    def J(self):
+        nf = len(self.freqs_gw)
+        N = len(self.toas)
+        T = self.toas.max()-self.toas.min()
+        
+        #Fourier Design matrix
+        F  = jnp.zeros((N, 2 * nf))
+        f = jnp.arange(1, nf + 1) / T
+        F = F.at[:, ::2].set(jnp.sin(2 * jnp.pi * self.toas[:, None] * f[None, :]))
+        F = F.at[:, 1::2].set(jnp.cos(2 * jnp.pi * self.toas[:, None] * f[None, :]))
+        del f   
+        return jnp.matmul(self.G.T, F)
+    
+    @cached_property
+    def Z(self):
+         return jnp.matmul(self.J.T, self.K_inv)
+        
 
     
     @cached_property
@@ -491,44 +485,44 @@ class RRF_Spectrum(object):
         Returns:, 
             _type_: _description_
         """
-        #Defining Ncal and NcalInv depending on existence of self.N or self.K_inv
-        nf = len(self.freqs_gw)
-        N = len(self.toas)
-        T = self.toas.max()-self.toas.min()
-        
         #Fourier Design matrix
-        F  = jnp.zeros((N, 2 * nf))
-        f = jnp.arange(1, nf + 1) / T
-        F = F.at[:, ::2].set(jnp.sin(2 * jnp.pi * self.toas[:, None] * f[None, :]))
-        F = F.at[:, 1::2].set(jnp.cos(2 * jnp.pi * self.toas[:, None] * f[None, :]))
-        del f   
-        J = jnp.matmul(self.G.T, F)
-        del F
-        phi =  self.Cirn + self.Cgw
-
-
-        Z = jnp.matmul(J.T, self.K_inv)
-        Sigma = jnp.matmul(Z, J) + jnp.linalg.inv(phi)
+        #if not hasattr(self, '_NcalInv'):
+        #    K_inv = jnp.array(self.K_inv)
+        #    G = jnp.array(self.G)
+        #    J = jnp.array(self.J)
+        #    Z = jnp.array(self.Z)
+        #   freqs = jnp.array(self.freqs)
+        #   toas = jnp.array(self.toas)
+        T = self.toas.max()-self.toas.min()
+        phi = jnp.array(self.Cirn + self.Cgw)/T
+        #    self._NcalInv = get_NcalInv_RRF(K_inv, G, phi, J, Z, freqs, toas, full_matrix, return_Gtilde_Ncal)
+       
+        Sigma = jnp.matmul(self.Z, self.J) + jnp.linalg.inv(phi)
         SigmaInv = jnp.linalg.inv(Sigma)
 
-
-        del J, Sigma
+        del Sigma
         
         Gtilde = jnp.zeros((self.freqs.size,self.G.shape[1]),dtype='complex128')
         Gtilde = jnp.dot(jnp.exp(1j*2*jnp.pi*self.freqs[:,jnp.newaxis]*self.toas),self.G)
 
-        NcalInv = (self.K_inv + jnp.matmul(Z.T, jnp.matmul(SigmaInv, Z))) / 2#divide by 2 for some reason   
+        NcalInv_v1 = (self.K_inv - jnp.matmul(self.Z.T, jnp.matmul(SigmaInv, self.Z))) #divide by 2 for some reason   
+        NcalInv_v2 = jnp.linalg.inv(jnp.linalg.inv(self.K_inv) + jnp.matmul(self.J, jnp.matmul(phi, self.J.T)))
+        print(NcalInv_v2/NcalInv_v1)
 
-        del SigmaInv, Z, self.K_inv
+        del SigmaInv, self.K_inv
         #divided by 4, not 2 for some reason, possibly some normalization stuff
-        TfN = jnp.matmul(jnp.conjugate(Gtilde),jnp.matmul(NcalInv,Gtilde.T)) / 2
+        TfN = jnp.matmul(jnp.conjugate(Gtilde),jnp.matmul(NcalInv_v2,Gtilde.T)) / 2
 
         if return_Gtilde_Ncal:
-            return jnp.real(TfN), Gtilde, jnp.linalg.inv(NcalInv)
+            return jnp.real(TfN), Gtilde, jnp.linalg.inv(NcalInv_v1)
         elif full_matrix:
             return jnp.real(TfN)
         else:
             return jnp.real(jnp.diag(TfN)) / T
+        
+        
+        
+    
             
     @property
     def P_n(self):
@@ -636,7 +630,7 @@ class RRF_Spectrum(object):
         else:
             ff = f_gw
         red_noise = A**2*(ff/fyr)**(-gamma)/(12*np.pi**2) * yr_sec**3
-        #self._psd_prefit += red_noise
+        self._psd_prefit += red_noise
         if vals:
             return red_noise
 
@@ -1208,8 +1202,8 @@ def get_NcalInvIJ(psrs, A_GWB, freqs, full_matrix=False,
     Gtilde = np.dot(np.exp(1j*2*np.pi*ff[:,np.newaxis]*toas),G)
     # N_freq x N_TOA-N_par
     #CHANGE BACK
-    # psd = red_noise_powerlaw(A=A_GWB, gamma=13./3, freqs=freqs)
-    psd = 2*(365.25*24*3600/40)*(1e-6)**2
+    psd = red_noise_powerlaw(A=A_GWB, gamma=13./3, freqs=freqs)
+    #psd = 2*(365.25*24*3600/40)*(1e-6)**2
     Ch_blocks = [[(HD([pc.phi,pr.phi],[pc.theta,pr.theta])
                    *corr_from_psdIJ(freqs=freqs, psd=psd, toasI=pc.toas,
                                     toasJ=pr.toas, fast=True))

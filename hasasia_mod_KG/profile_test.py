@@ -21,9 +21,9 @@ import matplotlib as mpl
 import healpy as hp
 import astropy.units as u
 import astropy.constants as c
-mpl.rcParams['figure.dpi'] = 300
-mpl.rcParams['figure.figsize'] = [5,3]
-mpl.rcParams['text.usetex'] = True
+#mpl.rcParams['figure.dpi'] = 300
+#mpl.rcParams['figure.figsize'] = [5,3]
+#mpl.rcParams['text.usetex'] = True
 from enterprise.pulsar import Pulsar as ePulsar
 from memory_profiler import profile
 
@@ -32,7 +32,7 @@ import sensitivity as hsen
 import sim as hsim
 import skymap as hsky
 #needed to profile within sensitivity library
-from sensitivity import get_NcalInv_mem, get_NcalInv_RFF_mem, corr_from_psd_mem
+#from sensitivity import get_NcalInv_mem, get_NcalInv_RFF_mem, corr_from_psd_mem
 
 class PseudoPulsar:
     """Quick class to store data from HDF5 file in prep for hasasia pulsar creation"""
@@ -71,6 +71,10 @@ hsen_psr_RRF_spec_mem= open(path + '/psr_hsen_spec_mem_RRF.txt','w')
 time_inc_psr = open(path + '/psr_increm.txt','w')
 time_inc_specs = open(path + '/specs_increm.txt','w')
 Null_time_file = open(path + '/Null_time.txt','w')
+
+batch_time = open(path + '/Batch_time.txt','w')
+
+
 
 def get_psrname(file,name_sep='_'):
     """Function that grabs names of pulsars from parameter files
@@ -312,7 +316,7 @@ def hsen_spectrum_creation(pseudo:PseudoSpectraPulsar)->hsen.Spectrum:
     
     _ = spec_psr.NcalInv
     end_time = time.time()
-    time_inc_specs.write(f"OG {name} {start_time-null_time} {end_time-null_time}\n")
+    time_inc_specs.write(f"OG {spec_psr.name} {start_time-null_time} {end_time-null_time}\n")
     time_inc_specs.flush()
     spec_psr.name = pseudo.name
     print(f'Spectrum {spec_psr.name} created')
@@ -345,7 +349,7 @@ def hsen_spectrum_creation_rrf(pseudo:PseudoSpectraPulsar, gam_gw:float, amp_gw:
 
     _ = spec_psr.NcalInv
     end_time = time.time()
-    time_inc_specs.write(f"RRF {name} {start_time-null_time} {end_time-null_time}\n")
+    time_inc_specs.write(f"RRF {spec_psr.name} {start_time-null_time} {end_time-null_time}\n")
     time_inc_specs.flush()
     print(f'RRF Spectrum {spec_psr.name} created')
     return spec_psr
@@ -526,11 +530,52 @@ def chains_puller(num: int):
     return gw_log10_A_samples[rand_samples_ind], gw_gamma_samples[rand_samples_ind]
 
 
+def save_h_c(data_path, hc_dsc, hc_sc, a_gw, gam_gw, freqs, batch_num: int): 
+    with h5py.File(data_path, 'a') as f:
+        hdf5 = f.create_group(f'batch_{batch_num}')
+        hdf5.create_dataset('A_gw', (1,), float, data=a_gw)
+        hdf5.create_dataset('gam_gw', (1,), float, data=gam_gw)
+        hdf5.create_dataset('hc_dsc', hc_dsc.shape, hc_dsc.dtype, data=hc_dsc)
+        hdf5.create_dataset('hc_sc', hc_sc.shape, hc_sc.dtype, data=hc_sc)
+        hdf5.create_dataset('freqs', freqs.shape, freqs.dtype, data=freqs)
+        f.flush()
 
-
-
-
-
+def sens_gen():
+    gw_log10_A_samples, gw_gam_samples = chains_puller(num_chains)
+    for i in range(num_chains):
+        time_start_bt = time.time()
+        print(f'GWB Spectral Index:{gw_gam_samples[i]}')
+        print(f'GWB Spectral Amplitude:{10**gw_log10_A_samples[i]}')
+        #reading hdf5 file containing hasasia pulsar attributes from rank-reduced method to create list of spectrum objects     
+        with h5py.File(hsen_dir_rrf,'r') as hsenfrrf:
+            specs_rrf = []
+            for name in names_list:
+                psr = hsenfrrf[name]
+                pseudo = PseudoSpectraPulsar(toas=psr['toas'][:], toaerrs=psr['toaerrs'][:], phi = psr['phi'][:][0],
+                                        theta = psr['theta'][:][0], pdist=psr['pdist'][:], K_inv=psr['K_inv'][:], G=psr['G'][:],
+                                        designmatrix=psr['designmatrix'])
+                pseudo.name = name
+                hsen_psr_RRF_spec_mem.write(f'Pulsar: {name}\n')
+                hsen_psr_RRF_spec_mem.flush()
+                spec_psr_rrf = hsen_spectrum_creation_rrf(pseudo, gw_gam_samples[i], 10**gw_log10_A_samples[i])
+                specs_rrf.append(spec_psr_rrf)
+                
+        
+        #creation of sensitivity curves rank-reduced method
+        rrf_sc = hsen.GWBSensitivityCurve(specs_rrf)
+        rrf_dsc = hsen.DeterSensitivityCurve(specs_rrf)
+        del specs_rrf
+        save_h_c(data_path, rrf_dsc.h_c, rrf_sc.h_c,
+                    10**gw_log10_A_samples[i], gw_gam_samples[i], rrf_sc.freqs, i)
+        del rrf_sc
+        del rrf_dsc
+        print()
+        print(f'Batch #{i+1} finished!')
+        print()
+        time_end_bt = time.time()
+        batch_time.write(f'{time_end_bt-time_start_bt}\n')
+        batch_time.flush()
+    batch_time.close()
 
 
 if __name__ == '__main__':
@@ -541,8 +586,8 @@ if __name__ == '__main__':
     ###################################################
     #max is 34 for 11yr dataset
     #max is 45 for 12yr dataset
-    kill_count =  3
-    num_chains = 1000
+    kill_count = 45 
+    num_chains = 1
     thin = 5
     #yr used for making WN correlation matrix, specifically when yr=15
     yr=12
@@ -557,11 +602,12 @@ if __name__ == '__main__':
         #Realistic PTA datasets
         #pars, tims, noise, rn_psrs, edir, ephem = yr_11_data()
         pars, tims, noise, rn_psrs, edir, ephem = yr_12_data()
-        
-        #enterprise pulsars creation, disk write, and deletion
-        #ePsrs = enterprise_creation(pars, tims, ephem)
-        #enterprise_hdf5(ePsrs, noise, yr, edir, thin)
-        #del ePsrs
+
+        #if file does not exist, then re-compute it
+        if not os.path.isfile(edir):
+            ePsrs = enterprise_creation(pars, tims, ephem)
+            enterprise_hdf5(ePsrs, noise, yr, edir, thin)
+            del ePsrs
 
         #reading hdf5 file containing enterprise.pulsar attributes
         with h5py.File(edir, 'r') as f:
@@ -578,68 +624,60 @@ if __name__ == '__main__':
                 
             #Rank-Reduced Method for creation of hasasia pulsars, and saving them to hdf5 file
             hsen_dir_rrf = os.path.expanduser('~/hsen_psrs_rrf.hdf5')
-            #comment this out if pulsars were already saved to hdf5 file
-            #hsen_rrf_pulsar_hdf5_entire(f, names_list, hsen_dir_rrf)
-                
-        gw_log10_A_samples, gw_gam_samples = chains_puller(num_chains)
-        rrf_sc_freqs_total = []
-        rrf_sc_hc_total = []
-        rrf_dsc_freqs_total = []
-        rrf_dsc_hc_total = []
+            if not os.path.isfile(hsen_dir_rrf):
+                hsen_rrf_pulsar_hdf5_entire(f, names_list, hsen_dir_rrf)
 
-        for i in range(num_chains):
-            print(f'GWB Spectral Index:{gw_gam_samples[i]}')
-            print(f'GWB Spectral Amplitude:{10**gw_log10_A_samples[i]}')
-            #reading hdf5 file containing hasasia pulsar attributes from rank-reduced method to create list of spectrum objects     
-            with h5py.File(hsen_dir_rrf,'r') as hsenfrrf:
-                specs_rrf = []
-                for name in names_list:
-                    psr = hsenfrrf[name]
-                    pseudo = PseudoSpectraPulsar(toas=psr['toas'][:], toaerrs=psr['toaerrs'][:], phi = psr['phi'][:][0],
-                                            theta = psr['theta'][:][0], pdist=psr['pdist'][:], K_inv=psr['K_inv'][:], G=psr['G'][:],
-                                            designmatrix=psr['designmatrix'])
-                    pseudo.name = name
-                    hsen_psr_RRF_spec_mem.write(f'Pulsar: {name}\n')
-                    hsen_psr_RRF_spec_mem.flush()
-                    spec_psr_rrf = hsen_spectrum_creation_rrf(pseudo, gw_gam_samples[i], 10**gw_log10_A_samples[i])
-                    specs_rrf.append(spec_psr_rrf)
-                    
-            
-            #creation of sensitivity curves rank-reduced method
-            rrf_sc = hsen.GWBSensitivityCurve(specs_rrf)
-            rrf_dsc = hsen.DeterSensitivityCurve(specs_rrf)
-            del specs_rrf
-
-            rrf_sc_freqs_total.append(rrf_sc.freqs)
-            rrf_sc_hc_total.append(rrf_sc.h_c)
-            del rrf_sc
-
-            rrf_dsc_freqs_total.append(rrf_dsc.freqs)
-            rrf_dsc_hc_total.append(rrf_dsc.h_c)
-            del rrf_dsc
-
-            print()
-            print(f'Batch #{i+1} finished!')
-            print()
-
+        data_path = os.path.expanduser('~/h_c_data.hdf5')
+        if not os.path.isfile(data_path):
+            sens_gen()
         
 
-    with open(path + '/test_time.txt', "w") as file:
+    with open(path + '/test_time.txt', 'w') as file:
         #saving cprofile data
         stats = pstats.Stats(pr, stream=file)
         stats.sort_stats(pstats.SortKey.TIME, pstats.SortKey.CUMULATIVE)
         stats.print_stats()
 
+        h_sc_matrix = np.zeros((freqs.size, num_chains))
+        h_dsc_matrix = np.zeros((freqs.size, num_chains))
+    
+        
         #plotting sensitivity curves
-        plt.title(f'NANOGrav {yr}-year Data Set Sensitivity Curve')
+        
         for i in range(num_chains):
-            plt.loglog(rrf_sc_freqs_total[i],rrf_sc_hc_total[i],  label='RRF Stoch', lw=0.2)
-            plt.loglog(rrf_dsc_freqs_total[i],rrf_dsc_hc_total[i], label='RRF Det', lw=0.2)
-            
+            with h5py.File(data_path, 'r') as data_f:
+                data = data_f['batch_'+str(i)]
+                freqs = data['freqs'][:]
+                h_sc_matrix[:,i] = data['hc_sc'][:]
+                h_dsc_matrix[:,i] = data['hc_dsc'][:]
+
+        h_sc_min = []
+        h_sc_max = []
+        h_dsc_min = []
+        h_dsc_max = []
+        
+        for i in range(freqs.size):
+            h_sc_min.append(np.min(h_sc_matrix[i,:]))
+            h_sc_max.append(np.max(h_sc_matrix[i,:]))
+            h_dsc_min.append(np.min(h_dsc_matrix[i,:]))
+            h_dsc_max.append(np.max(h_dsc_matrix[i,:]))
+
+        
+        plt.title(f'NANOGrav {yr}-year Data Set Sensitivity Curve')
+        plt.loglog(freqs, h_sc_min, label='min Stoch', lw=0.2, c='black')
+        plt.loglog(freqs, h_sc_max, label='max Stoch', lw=0.2, c='black')
+        plt.loglog(freqs, h_dsc_min, label='min Det', lw=0.2, c='red')
+        plt.loglog(freqs, h_dsc_max, label='max Det', lw=0.2, c='red')
+
+        plt.fill_between(freqs, h_sc_min, h_sc_max, color='gray')
+        plt.fill_between(freqs, h_dsc_min, h_dsc_max, color='orange')
+
+        #plt.loglog.fill_between(freqs, h_sc_min, h_sc_max)
+        plt.tight_layout()
         plt.xlabel('Frequencies, Hz')
         plt.ylabel('Characteristic Strain, $h_c$')
         plt.grid(which='both')
-        #plt.legend()
+        plt.legend()
         plt.savefig(path+'/sc_h_c.png')
         plt.show()
 
