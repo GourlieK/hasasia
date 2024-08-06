@@ -1,22 +1,11 @@
 #Kyle Gourlie
 #7/23/2024
 #library imports
-
-import os, shutil
-#Memory Profile File Locations
-path = os.path.expanduser('~/Desktop/Profile_Data')
-try:
-    os.mkdir(path)
-except FileExistsError:
-    shutil.rmtree(path)
-    os.mkdir(path)
-    
-    
-import h5py, gc
+import os, shutil, psutil, time, threading, random, h5py, gc, glob, json, cProfile, pstats
 import numpy as np
+import dask.array as da
 import scipy.linalg as sl
 import matplotlib.pyplot as plt
-import glob, pickle, json, cProfile, pstats, os, time
 import matplotlib as mpl
 import healpy as hp
 import astropy.units as u
@@ -27,12 +16,34 @@ mpl.rcParams['text.usetex'] = True
 from enterprise.pulsar import Pulsar as ePulsar
 from memory_profiler import profile
 
+#Memory Profile File Locations
+path = os.path.expanduser('~/Desktop/Profile_Data')
+#creation of folder to store profile data
+try:
+    os.mkdir(path)
+except FileExistsError:
+    shutil.rmtree(path)
+    os.mkdir(path)
+
+def log_memory_usage(file_path:str):
+    """Function to save memory and time profile data at 0.5 second increments, and saves data to txt file
+
+    Args:
+        file_path (str): directory of text file
+    """
+    with open(file_path, 'a') as f:
+        while True:
+            timestamp = time.time()
+            memory_info = psutil.virtual_memory()
+            memory_usage = memory_info.used / (1024 ** 3)  # Convert bytes to GB
+            f.write(f"{timestamp},{memory_usage}\n")
+            f.flush()  
+            time.sleep(0.5)
+
 #hasasia imports that are modified so they can be benchmarked
 import sensitivity as hsen
 import sim as hsim
 import skymap as hsky
-#needed to profile within sensitivity library
-from sensitivity import get_NcalInv_mem, get_NcalInv_RFF_mem, corr_from_psd_mem
 
 class PseudoPulsar:
     """Quick class to store data from HDF5 file in prep for hasasia pulsar creation"""
@@ -69,8 +80,8 @@ hsen_psr_spec_mem = open(path + '/psr_hsen_spec_mem.txt','w')
 hsen_psr_RRF_spec_mem= open(path + '/psr_hsen_spec_mem_RRF.txt','w')
 #Total time taken to generate each pulsar 
 time_inc_psr = open(path + '/psr_increm.txt','w')
+#Total time taken to generate each spectrum
 time_inc_specs = open(path + '/specs_increm.txt','w')
-Null_time_file = open(path + '/Null_time.txt','w')
 
 def get_psrname(file,name_sep='_'):
     """Function that grabs names of pulsars from parameter files
@@ -155,6 +166,7 @@ def enterprise_hdf5(ePsrs:list, noise:dict, yr:float, edir:str, thin):
     with h5py.File(edir, 'w') as f:
         Tspan_h5 = f.create_dataset('Tspan', (1,), float)
         Tspan_h5[:] = Tspan
+        #numpy array stored with placeholders so names can be indexed into it later, also storing strings as bytes
         name_list = np.array(['X' for _ in range(kill_count)], dtype=h5py.string_dtype(encoding='utf-8'))
         #pseudo while/for-loop designed to delete first entry
         i = 0
@@ -172,18 +184,18 @@ def enterprise_hdf5(ePsrs:list, noise:dict, yr:float, edir:str, thin):
             f.flush()
             del ePsrs[0]
             i+=1
-
+            #once all the pulsars are deleted, the length of the list is zero
             if len(ePsrs) == 0:
                 break
             
         f.create_dataset('names',data = name_list)
-        del ePsrs[:]
         f.flush()
-        gc.collect()
+        print('enterprise.pulsars successfully saved to HDF5\n')
+
 
 
 def hsen_pulsar_entry(psr:hsen.Pulsar, dir:str):
-    """Writes hasasia pulsar object to hdf5 file"""        
+    """Writes hasasia pulsar object to hdf5 file"""   
     with h5py.File(dir, 'a') as f:
         hdf5_psr = f.create_group(psr.name)
         hdf5_psr.create_dataset('toas', psr.toas.shape, psr.toas.dtype, data=psr.toas)
@@ -192,9 +204,11 @@ def hsen_pulsar_entry(psr:hsen.Pulsar, dir:str):
         hdf5_psr.create_dataset('theta', (1,), float, data=psr.theta)
         hdf5_psr.create_dataset('designmatrix', psr.designmatrix.shape, psr.designmatrix.dtype, data=psr.designmatrix)
         hdf5_psr.create_dataset('G', psr.G.shape, psr.G.dtype, data=psr.G)
-        hdf5_psr.create_dataset('K_inv', psr.K_inv.shape, psr.K_inv.dtype, data=psr.K_inv)
+        da.to_hdf5(dir, f"{psr.name}/K_inv", psr.K_inv)   
+        #hdf5_psr.create_dataset('K_inv', psr.K_inv.shape, psr.K_inv.dtype, data=psr.K_inv)
         hdf5_psr.create_dataset('pdist', (2,), float, data=psr.pdist)
         f.flush()
+        print(f'hasasia pulsar {psr.name} successfully saved to HDF5', end='\r')
 
 @profile(stream=hsen_psr_mem)
 def hsen_pulsar_creation(pseudo:PseudoPulsar, hsen_dir:str):
@@ -205,15 +219,16 @@ def hsen_pulsar_creation(pseudo:PseudoPulsar, hsen_dir:str):
         hsen_dir (str): directory for storing hasasia pulsar object
     """
     start_time = time.time()
-    plaw = hsen.red_noise_powerlaw(A=A_gw, gamma=gam_gw, freqs=freqs)
+    #adding red noise covariance matrix responsible for the gravitational wave background based on the selected frequencies
+    gwb = hsen.red_noise_powerlaw(A=A_gw, gamma=gam_gw, freqs=freqs_gwb)
+    pseudo.N += hsen.corr_from_psd(freqs=freqs_gwb, psd=gwb,
+                                toas=pseudo.toas[::thin])
 
-    #if red noise parameters for an individual pulsar is present, add it to standard red noise
+    #if instrisic red noise parameters for individual pulsars exist, then add red noise covarariance matrix to it
     if pseudo.name in rn_psrs.keys():
         Amp, gam = rn_psrs[pseudo.name]
-        plaw += hsen.red_noise_powerlaw(A=Amp, gamma=gam, freqs=freqs)  #was +=
-
-    #adding red noise components to the noise covariance matrix via power spectral density
-    pseudo.N += hsen.corr_from_psd(freqs=freqs, psd=plaw,
+        plaw = hsen.red_noise_powerlaw(A=Amp, gamma=gam, freqs=freqs_rn)  #was +=
+        pseudo.N += hsen.corr_from_psd(freqs=freqs_rn, psd=plaw,
                                 toas=pseudo.toas[::thin])   
     #creating hasasia pulsar tobject 
     psr = hsen.Pulsar(toas=pseudo.toas[::thin],
@@ -222,6 +237,7 @@ def hsen_pulsar_creation(pseudo:PseudoPulsar, hsen_dir:str):
                         N=pseudo.N, designmatrix=pseudo.Mmat[::thin,:], pdist=pseudo.pdist)
     #setting name of hasasia pulsar
     psr.name = pseudo.name
+    #calling (GCG^T)^-1 to be computed 
     _ = psr.K_inv
     end_time = time.time()
     time_inc_psr.write(f"OG {psr.name} {start_time-null_time} {end_time-null_time}\n")
@@ -248,8 +264,6 @@ def hsen_pulsar_rrf_creation(pseudo: PseudoPulsar, hsen_dir_rrf:str):
     time_inc_psr.flush()
     hsen_pulsar_entry(psr, hsen_dir_rrf)
 
-
-
 def hsen_pulsr_hdf5_entire(f:str, names_list:list, hsen_dir:str):
     """_summary_: Function that goes through entire process of creating fake hasasia pulsar object, create hasasia pulsar object, and 
     saves attributes to hdf5 file. Primary use of this function is to be not executed if already saved. This function is for the original
@@ -266,12 +280,11 @@ def hsen_pulsr_hdf5_entire(f:str, names_list:list, hsen_dir:str):
                         theta = psr['theta'][:][0], pdist=psr['pdist'][:], N=psr['N'][:])
         pseudo.name = name
         pseudo.Mmat= psr['designmatrix'][:]
-
+        
         hsen_psr_mem.write(f'Pulsar: {name}\n')
         hsen_psr_mem.flush()
         hsen_pulsar_creation(pseudo, hsen_dir)
         del pseudo
-
 
 def hsen_rrf_pulsar_hdf5_entire(f:str, names_list:list, hsen_dir_rrf:str):
     """_summary_: Function that goes through entire process of creating fake hasasia pulsar object, create hasasia pulsar object, and 
@@ -307,9 +320,8 @@ def hsen_spectrum_creation(pseudo:PseudoSpectraPulsar)->hsen.Spectrum:
     """
     start_time = time.time()
     spec_psr = hsen.Spectrum(pseudo, freqs=freqs)
-               
     spec_psr.name = pseudo.name
-    
+    #Calling computation of NcalInv, due to its high computational cost
     _ = spec_psr.NcalInv
     end_time = time.time()
     time_inc_specs.write(f"OG {name} {start_time-null_time} {end_time-null_time}\n")
@@ -329,13 +341,14 @@ def hsen_spectrum_creation_rrf(pseudo:PseudoSpectraPulsar)-> hsen.RRF_Spectrum:
     start_time = time.time()
     if pseudo.name in rn_psrs.keys():
         Amp, gam = rn_psrs[pseudo.name]
-        #creates spectrum hasasia pulsar to calculate characteristic straing
-        spec_psr = hsen.RRF_Spectrum(psr=pseudo, freqs_gw=freqs_rn,amp_gw=A_gw, gamma_gw=gam_gw, amp = Amp, gamma = gam, freqs=freqs)
-    
+        #creates spectrum pulsar based on both instrinsic red noise and gravitational wave background
+        spec_psr = hsen.RRF_Spectrum(psr=pseudo, freqs_gw=freqs_gwb,amp_gw=A_gw, gamma_gw=gam_gw,
+                                     freqs_rn=freqs_rn, amp = Amp, gamma = gam, freqs=freqs)
     else:
-        #creates spectrum hasasia pulsar to calculate characteristic straing
-        spec_psr = hsen.RRF_Spectrum(pseudo, freqs=freqs, freqs_gw=freqs_rn,amp_gw=A_gw, gamma_gw=gam_gw)
-    
+        #creates spectrum pulsar just based on gravitational wave background
+        spec_psr = hsen.RRF_Spectrum(psr=pseudo, freqs_gw=freqs_gwb,amp_gw=A_gw, gamma_gw=gam_gw,
+                                     freqs_rn=freqs_rn, freqs=freqs)
+        
     spec_psr.name = pseudo.name
 
     _ = spec_psr.NcalInv
@@ -343,7 +356,6 @@ def hsen_spectrum_creation_rrf(pseudo:PseudoSpectraPulsar)-> hsen.RRF_Spectrum:
     time_inc_specs.write(f"RRF {name} {start_time-null_time} {end_time-null_time}\n")
     time_inc_specs.flush()
     return spec_psr
-
 
 def yr_11_data():
     """Creates enterprise pulsars from the 11 yr dataset from parameter and timing files.
@@ -360,7 +372,6 @@ def yr_11_data():
         - Tspan: Total timespan of the PTA
         - enterprise_dir: specific directory name used for enterprise HDF5 file
     """
-    
     #File Paths
     pardir = '/home/gourliek/Nanograv/11yr_stochastic_analysis-master/nano11y_data/partim/'
     timdir = '/home/gourliek/Nanograv/11yr_stochastic_analysis-master/nano11y_data/partim/'
@@ -433,11 +444,7 @@ def yr_12_data():
     par_dir = data_dir + r'par/'
     tim_dir = data_dir + r'tim/'
     noise_file = data_dir + r'channelized_12p5yr_v3_full_noisedict.json' 
-
-    #directory name of enterprise hdf5 file
-    
-    
-    
+  
     #sorting parameter and timing files
     parfiles = sorted(glob.glob(par_dir+'*.par'))
     timfiles = sorted(glob.glob(tim_dir+'*.tim'))
@@ -489,8 +496,6 @@ def yr_12_data():
     
     return pars, tims, noise, rn_psrs, edir, ephem
 
-
-
 def chains_puller(num: int):
     """_summary_: Reads generated chains from the 12.5 yr data, varying spectral index, 30 frequencies, from the DE438 ephemeris.
 
@@ -521,23 +526,20 @@ def chains_puller(num: int):
 
 
 
-
-
-
-
-
-
 if __name__ == '__main__':
     null_time = time.time()
-    Null_time_file.write(f'{null_time}\n')
-    Null_time_file.flush()
-    Null_time_file.close()
+    log_path = path+'/time_mem_data.txt'
+    #this will allow memory profile data to run in parallel with the rest of the program
+    logging_thread = threading.Thread(target=log_memory_usage, args=(log_path,))
+    logging_thread.daemon = True  # Ensure the thread will exit when the main program exits
+    logging_thread.start()
+
     ###################################################
     #max is 34 for 11yr dataset
     #max is 45 for 12yr dataset
-    kill_count =  34
-    num_chains = 5
-    thin = 1
+    kill_count =  45
+    #num_chains = 5
+    thin = 2
     #yr used for making WN correlation matrix, specifically when yr=15
     yr=12
     fyr = 1/(365.25*24*3600)
@@ -545,25 +547,26 @@ if __name__ == '__main__':
     A_gw = 1.73e-15
     gam_gw = 13/3
 
-   
+
     names_list = []
     with cProfile.Profile() as pr:
         #Realistic PTA datasets
-        pars, tims, noise, rn_psrs, edir, ephem = yr_11_data()
-        #pars, tims, noise, rn_psrs, edir, ephem = yr_12_data()
+        #pars, tims, noise, rn_psrs, edir, ephem = yr_11_data()
+        pars, tims, noise, rn_psrs, edir, ephem = yr_12_data()
         
         #enterprise pulsars creation, disk write, and deletion
-        
-        ePsrs = enterprise_creation(pars, tims, ephem)
-        enterprise_hdf5(ePsrs, noise, yr, edir, thin)
-        del ePsrs
+        if not os.path.isfile(edir):
+            ePsrs = enterprise_creation(pars, tims, ephem)
+            enterprise_hdf5(ePsrs, noise, yr, edir, thin)
+            del ePsrs
 
         #reading hdf5 file containing enterprise.pulsar attributes
         with h5py.File(edir, 'r') as f:
             #reading Tspan and creation of frequencies to observe
             Tspan = f['Tspan'][:][0]
-            freqs = np.logspace(np.log10(1/(5*Tspan)),np.log10(2e-6),400)
-            freqs_rn = np.arange(1/Tspan, 31/Tspan, 1/Tspan)
+            freqs = np.logspace(np.log10(1/(5*Tspan)),np.log10(2e-7),400)
+            freqs_rn = np.linspace(1/Tspan, 30/Tspan, 30)
+            freqs_gwb = np.linspace(1/Tspan, 5/Tspan, 5)
 
             #reading names encoded as bytes, and re-converting them to strings, and deleting byte names
             names = f['names'][:]
@@ -573,17 +576,16 @@ if __name__ == '__main__':
 
             #Original Method for creation of hasasia pulsars, and saving them to hdf5 file
             hsen_dir = os.path.expanduser('~/hsen_psrs.hdf5')
-            #comment this out if pulsars were already saved to hdf5 file
-            hsen_pulsr_hdf5_entire(f, names_list, hsen_dir)
+            if not os.path.isfile(hsen_dir):
+                hsen_pulsr_hdf5_entire(f, names_list, hsen_dir)
                 
                 
             #Rank-Reduced Method for creation of hasasia pulsars, and saving them to hdf5 file
             hsen_dir_rrf = os.path.expanduser('~/hsen_psrs_rrf.hdf5')
-            #comment this out if pulsars were already saved to hdf5 file
-            hsen_rrf_pulsar_hdf5_entire(f, names_list, hsen_dir_rrf)
+            if not os.path.isfile(hsen_dir_rrf):
+                hsen_rrf_pulsar_hdf5_entire(f, names_list, hsen_dir_rrf)
                 
-        
-        #gw_log10_A_samples, gw_gam_samples = chains_puller(num_chains)
+    
         #reading hdf5 file containing hasasia pulsar attributes from original method to create list of spectrum objects
         with h5py.File(hsen_dir,'r') as hsenf:
             specs = []
@@ -634,7 +636,7 @@ if __name__ == '__main__':
         del rrf_sc, rrf_dsc
 
         
-
+##############################SENSITIVITY CURVE PLOT START##################################################
     with open(path + '/test_time.txt', "w") as file:
         #saving cprofile data
         stats = pstats.Stats(pr, stream=file)
@@ -652,5 +654,243 @@ if __name__ == '__main__':
         plt.title(f'NANOGrav {yr}-year Data Set Sensitivity Curve')
         plt.grid(which='both')
         plt.legend()
-        plt.savefig(path+'/sc_h_c.png')
+        plt.savefig(path+'/sc_h_c.png', bbox_inches ="tight", dpi=1000)
         plt.show()
+##############################SENSITIVITY CURVE PLOT END####################################################
+
+
+
+##############################MEMORY VS TIME PLOTTING START#################################################
+    #total memory vs time data
+    mem_data = []
+    time_data = []
+    with open(log_path, 'r') as file:  
+        for line in file:
+            line_sep = line.split(',')
+            time_data.append(float(line_sep[0]))
+            mem_data.append(float(line_sep[1]))
+
+    time_data = np.array(time_data)
+    time_data = time_data-null_time
+    mem_data = np.array(mem_data)
+    plt.style.use('dark_background')
+    plt.title('Memory vs Time')
+    plt.plot(time_data, mem_data, c='yellow')
+    plt.xlabel('Time (s)')
+    plt.ylabel('Virtual Memory (GB)')
+    plt.savefig(path+'/mem_time.png')
+    plt.show()
+
+
+
+    # Generate random colors
+    hexadecimal_alphabets = '0123456789ABCDEF'
+    num_colors = len(names_list)
+    color = ["#" + ''.join([random.choice(hexadecimal_alphabets) for _ in range(6)]) for _ in range(num_colors)]
+    
+    increms_psrs = []
+    with open(path + '/psr_increm.txt', 'r') as file:
+        for line in file:
+            line = line.strip('\n').split()
+            increms_psrs.append(line)
+
+    increms_specs = []
+    with open(path + '/specs_increm.txt', 'r') as file:
+        for line in file:
+            line = line.strip('\n').split()
+            increms_specs.append(line)
+
+    rrf_handles_psr = []
+    original_handles_psr = []
+    rrf_handles_specs = []
+    original_handles_specs = []
+
+    # Grabbing increment data and plotting
+    for i in range(len(increms_psrs)):
+        name_psr = increms_psrs[i][0] + increms_psrs[i][1]
+        val_1_psr = float(increms_psrs[i][2])
+        val_2_psr = float(increms_psrs[i][3])
+        index_psr = np.where((time_data >= val_1_psr) & (time_data <= val_2_psr))
+        # Plot pulsar data
+        line_psr, = plt.plot(time_data[index_psr], mem_data[index_psr], label=name_psr, color=color[i])
+        if "RRF" in name_psr:
+            rrf_handles_psr.append(line_psr)
+        else:
+            original_handles_psr.append(line_psr)
+            
+    # Plot pulsar data
+    plt.title(f"Memory vs Time of Pulsar Objects")
+    plt.xlabel('Time [s]')
+    plt.ylabel('RAM Memory Usage [MB]')
+    plt.grid()
+    plt.axhline(y=0, color='black')
+    plt.axvline(x=0, color='black')
+    plt.xlim(time_data[0] - 1, time_data[-1] + 1)
+
+    # Create legends
+    first_legend_psr = plt.legend(handles=original_handles_psr, loc='upper left', bbox_to_anchor=(-0.18, 1.15))
+    second_legend_psr = plt.legend(handles=rrf_handles_psr, loc='upper right', bbox_to_anchor=(1.12, 1.15))
+
+    # Add the legends to the plot
+    plt.gca().add_artist(first_legend_psr)
+    plt.gca().add_artist(second_legend_psr)
+
+    # Save and show the plot
+    plt.savefig(path+'/colored_mem_time_psrs.png')
+    plt.show()
+
+    for i in range(len(increms_specs)): 
+        name_psr = increms_specs[i][0] + increms_specs[i][1]
+        val_1_spec = float(increms_specs[i][2])
+        val_2_spec = float(increms_specs[i][3])
+
+        index_specs = np.where((time_data >= val_1_spec) & (time_data <= val_2_spec))
+
+        # Plot spectrum data
+        line_specs, = plt.plot(time_data[index_specs], mem_data[index_specs], label=name_psr, color=color[i])
+        if "RRF" in name_psr:
+            rrf_handles_specs.append(line_specs)
+        else:
+            original_handles_specs.append(line_specs)
+
+
+    # Plot spectrum data
+    plt.title(f"Memory vs Time of {len(increms_specs)} Pulsars from Spectrum Objects")
+    plt.xlabel('Time [s]')
+    plt.ylabel('RAM Memory Usage [MB]')
+    plt.grid()
+    plt.axhline(y=0, color='black')
+    plt.axvline(x=0, color='black')
+    plt.xlim(time_data[0] - 1, time_data[-1] + 1)
+
+    # Create legends
+    first_legend_specs = plt.legend(handles=original_handles_specs, loc='upper left', bbox_to_anchor=(-0.18, 1.15))
+    second_legend_specs = plt.legend(handles=rrf_handles_specs, loc='upper right', bbox_to_anchor=(1.12, 1.15))
+
+    # Add the legends to the plot
+    plt.gca().add_artist(first_legend_specs)
+    plt.gca().add_artist(second_legend_specs)
+
+    # Save and show the plot
+    plt.savefig(path+'/colored_mem_time_specs.png')
+    plt.show()
+    plt.close()
+    
+
+
+##############################MEMORY VS TIME PLOTTING END#######################################################
+
+
+
+##############################BAR CHARTS FOR TOTAL TIME OF COMPUTATION PER PULSAR START#########################
+    with open(path + '/psr_increm.txt', 'r') as file:
+        OGS_psrs = {}
+        RRFS_psrs = {}
+        for line in file:
+            parse_line = line.split()
+            if parse_line[0] == 'OG':
+                OGS_psrs.update({parse_line[1]: (float(parse_line[3])-float(parse_line[2]))})
+
+            elif parse_line[0] == 'RRF':
+                RRFS_psrs.update({parse_line[1]: (float(parse_line[3])-float(parse_line[2]))})
+
+        all_names = OGS_psrs.keys()
+        ogs_plot_values_psrs = [OGS_psrs[name] if name in OGS_psrs else 0 for name in all_names]
+        rrfs_plot_values_psrs = [RRFS_psrs[name] if name in RRFS_psrs else 0 for name in all_names]
+
+        x = range(len(all_names))
+        plt.figure(figsize=(14, 7))
+        bar_width = 0.4
+        plt.bar(x, ogs_plot_values_psrs, width=bar_width, label='Original', color='blue', align='center')
+        # Plot RRFS values (shifted to the right by bar_width)
+        plt.bar([i + bar_width for i in x], rrfs_plot_values_psrs, width=bar_width, label='RRF', color='red', align='center')
+        # Add names to the x-axis
+        plt.xticks([i + bar_width / 2 for i in x], all_names, rotation=90)
+        plt.xlabel('Psrs')
+        plt.ylabel('Time [s]')
+        plt.title('Time to Create Pulsar Objects')
+        plt.legend(loc='upper right')
+        # Show plot
+        plt.tight_layout()
+        plt.savefig(path+'/time_bar_psrs.png') 
+        plt.show()
+##############################BAR CHARTS FOR TOTAL TIME OF COMPUTATION PER PULSAR END###########################
+
+
+
+##############################BAR CHART FOR TOTAL TIME OF COMPUTATION PER SPECTRA START#########################
+    with open(path + '/specs_increm.txt', 'r') as file:
+        OGS_specs = {}
+        RRFS_specs = {}
+        for line in file:
+            parse_line = line.split()
+            if parse_line[0] == 'OG':
+                OGS_specs.update({parse_line[1]: (float(parse_line[3])-float(parse_line[2]))})
+
+            elif parse_line[0] == 'RRF':
+                RRFS_specs.update({parse_line[1]: (float(parse_line[3])-float(parse_line[2]))})
+
+        all_names = OGS_specs.keys()
+        ogs_plot_values_specs = [OGS_specs[name] if name in OGS_specs else 0 for name in all_names]
+        rrfs_plot_values_specs = [RRFS_specs[name] if name in RRFS_specs else 0 for name in all_names]
+
+        x = range(len(all_names))
+        plt.figure(figsize=(14, 7))
+        bar_width = 0.4
+        plt.bar(x, ogs_plot_values_specs, width=bar_width, label='Original', color='blue', align='center')
+        plt.bar([i + bar_width for i in x], rrfs_plot_values_specs, width=bar_width, label='RRF', color='red', align='center')
+        plt.xticks([i + bar_width / 2 for i in x], all_names, rotation=90)
+
+        plt.xlabel('Psrs')
+        plt.ylabel('Time [s]')
+        plt.title('Time to Create Spectrum Objects')
+        plt.legend(loc='upper right')
+
+        plt.tight_layout()
+        plt.savefig(path+'/time_bar_specs.png') 
+        plt.show()
+##############################BAR CHART FOR TOTAL TIME OF COMPUTATION PER SPECTRA END###########################
+
+
+
+##############################BAR CHART FOR TOTAL TIME OF COMPUTATION PER PULSAR+SPECTRA START###################
+    og_psrs_tm = np.array(ogs_plot_values_psrs)
+    rrf_psrs_tm = np.array(rrfs_plot_values_psrs)
+
+    og_specs_tm = np.array(ogs_plot_values_specs)
+    rrf_specs_tm = np.array(rrfs_plot_values_specs)
+
+    total_og_tm = og_psrs_tm + og_specs_tm
+    total_rrf_tm = rrf_psrs_tm + rrf_specs_tm
+    x = range(len(all_names))
+
+    plt.figure(figsize=(14, 7))
+    bar_width = 0.4
+    plt.bar(x, total_og_tm, width=bar_width, label='Original', color='blue', align='center')
+    plt.bar([i + bar_width for i in x], total_rrf_tm, width=bar_width, label='RRF', color='red', align='center')
+
+    # Add names to the x-axis
+    plt.xticks([i + bar_width / 2 for i in x], all_names, rotation=90)
+
+    plt.xlabel('Psrs')
+    plt.ylabel('Time [s]')
+    plt.title('Total Time')
+    plt.legend(loc='upper right')
+
+    # Show plot
+    plt.tight_layout()
+    plt.savefig(path+'/time_bar_total.png') 
+    plt.show()
+##############################BAR CHART FOR TOTAL TIME OF COMPUTATION PER PULSAR+SPECTRA END#####################
+
+       
+
+
+
+
+
+
+
+    
+
+        

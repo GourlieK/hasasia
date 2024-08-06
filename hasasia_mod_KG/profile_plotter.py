@@ -126,11 +126,7 @@ if __name__ == '__main__':
         name_psr = increms_psrs[i][0] + increms_psrs[i][1]
         val_1_psr = float(increms_psrs[i][2])
         val_2_psr = float(increms_psrs[i][3])
-        
-        
         index_psr = np.where((time_data >= val_1_psr) & (time_data <= val_2_psr))
-        
-
         # Plot pulsar data
         line_psr, = plt.plot(time_data[index_psr], mem_data[index_psr], label=name_psr, color=color[i])
         if "RRF" in name_psr:
@@ -138,10 +134,8 @@ if __name__ == '__main__':
         else:
             original_handles_psr.append(line_psr)
             
-        
-
     # Plot pulsar data
-    plt.title(f"Memory vs Time of {len(increms_psrs)} Pulsars from Pulsar Objects")
+    plt.title(f"Memory vs Time of Pulsar Objects")
     plt.xlabel('Time [s]')
     plt.ylabel('RAM Memory Usage [MB]')
     plt.grid()
