@@ -317,12 +317,12 @@ class Pulsar(object):
         Note that the computation of K_inv will remove the white noise covariance matrix.
         This will have the computation of the Transmission function, get_TfN not possible.
         """
-        L = da.linalg.cholesky(da.array(self.N))        
-        A = da.matmul(L,da.array(self.G))
+        L = jnp.linalg.cholesky(self.N)        
+        A = jnp.matmul(L,G)
         del L
-        K = da.matmul(A.T,A)
+        K = jnp.matmul(A.T,A)
         del A
-        return da.linalg.inv(K)
+        return jnp.linalg.inv(K)
     
 
 #KG rrf changes
