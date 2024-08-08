@@ -3,7 +3,6 @@
 #library imports
 import os, shutil, psutil, time, threading, random, h5py, gc, glob, json, cProfile, pstats
 import numpy as np
-import dask.array as da
 import scipy.linalg as sl
 import matplotlib.pyplot as plt
 import matplotlib as mpl
@@ -204,8 +203,7 @@ def hsen_pulsar_entry(psr:hsen.Pulsar, dir:str):
         hdf5_psr.create_dataset('theta', (1,), float, data=psr.theta)
         hdf5_psr.create_dataset('designmatrix', psr.designmatrix.shape, psr.designmatrix.dtype, data=psr.designmatrix)
         hdf5_psr.create_dataset('G', psr.G.shape, psr.G.dtype, data=psr.G)
-        da.to_hdf5(dir, f"{psr.name}/K_inv", psr.K_inv)   
-        #hdf5_psr.create_dataset('K_inv', psr.K_inv.shape, psr.K_inv.dtype, data=psr.K_inv)
+        hdf5_psr.create_dataset('K_inv', psr.K_inv.shape, psr.K_inv.dtype, data=psr.K_inv)
         hdf5_psr.create_dataset('pdist', (2,), float, data=psr.pdist)
         f.flush()
         print(f'hasasia pulsar {psr.name} successfully saved to HDF5', end='\r')
@@ -496,35 +494,6 @@ def yr_12_data():
     
     return pars, tims, noise, rn_psrs, edir, ephem
 
-def chains_puller(num: int):
-    """_summary_: Reads generated chains from the 12.5 yr data, varying spectral index, 30 frequencies, from the DE438 ephemeris.
-
-    Resource: https://nanograv.org/science/data/125-year-stochastic-gravitational-wave-background-search
-
-    Args:
-        num (int): number of random samples
-
-    Returns:
-        Two numpy arrays containing the random samples
-    """
-    chain_path = os.path.expanduser('~/Nanograv/12p5yr_varying_sp_ind_30freqs/12p5yr_DE438_model2a_cRN30freq_gammaVary_chain.hdf5')
-    with h5py.File(chain_path, 'r') as chainf:
-        params = chainf['params'][:]
-        samples = np.array(chainf['samples'][:])
-        
-    list_params = [item.decode('utf-8') for item in params]
-    
-    gw_log10_A_ind = list_params.index('gw_log10_A')
-    gw_gamma_ind = list_params.index('gw_gamma')
-
-    gw_log10_A_samples = samples[30000:,gw_log10_A_ind]
-    gw_gamma_samples = samples[30000:,gw_gamma_ind]
-    
-    rand_samples_ind = np.random.choice(a=gw_log10_A_samples.shape[0], size=num, replace=False)
-    
-    return gw_log10_A_samples[rand_samples_ind], gw_gamma_samples[rand_samples_ind]
-
-
 
 if __name__ == '__main__':
     null_time = time.time()
@@ -537,9 +506,8 @@ if __name__ == '__main__':
     ###################################################
     #max is 34 for 11yr dataset
     #max is 45 for 12yr dataset
-    kill_count =  45
-    #num_chains = 5
-    thin = 2
+    kill_count =  5
+    thin = 10
     #yr used for making WN correlation matrix, specifically when yr=15
     yr=12
     fyr = 1/(365.25*24*3600)
@@ -682,7 +650,7 @@ if __name__ == '__main__':
     plt.show()
 
 
-
+"""
     # Generate random colors
     hexadecimal_alphabets = '0123456789ABCDEF'
     num_colors = len(names_list)
@@ -740,6 +708,7 @@ if __name__ == '__main__':
     plt.show()
 
     for i in range(len(increms_specs)): 
+        print(increms_specs)
         name_psr = increms_specs[i][0] + increms_specs[i][1]
         val_1_spec = float(increms_specs[i][2])
         val_2_spec = float(increms_specs[i][3])
@@ -883,7 +852,7 @@ if __name__ == '__main__':
     plt.show()
 ##############################BAR CHART FOR TOTAL TIME OF COMPUTATION PER PULSAR+SPECTRA END#####################
 
-       
+       """
 
 
 
