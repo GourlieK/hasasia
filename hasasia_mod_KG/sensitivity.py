@@ -14,11 +14,11 @@ import scipy.linalg as sl
 import os, pickle
 from astropy import units as u
 
-#os.environ["JAX_COMPILATION_CACHE_DIR"] = "/tmp/jax_cache"
-#jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
-#jax.config.update('jax_persistent_cache_min_compile_time_secs', 0)
-#from jax.experimental.compilation_cache import compilation_cache as cc
-#cc.set_cache_dir("/tmp/jax_cache")
+os.environ["JAX_COMPILATION_CACHE_DIR"] = "/tmp/jax_cache"
+jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
+jax.config.update('jax_persistent_cache_min_compile_time_secs', 0)
+from jax.experimental.compilation_cache import compilation_cache as cc
+cc.set_cache_dir("/tmp/jax_cache")
 
 #KG: changed from .utils
 from utils import create_design_matrix
@@ -317,12 +317,12 @@ class Pulsar(object):
         Note that the computation of K_inv will remove the white noise covariance matrix.
         This will have the computation of the Transmission function, get_TfN not possible.
         """
-        L = da.linalg.cholesky(da.array(self.N))        
-        A = da.matmul(L,da.array(self.G))
+        L = jsc.linalg.cholesky(self.N)        
+        A = jnp.matmul(L,self.G)
         del L
-        K = da.matmul(A.T,A)
+        K = jnp.matmul(A.T,A)
         del A
-        return da.linalg.inv(K)
+        return jnp.linalg.inv(K)
     
 
 #KG rrf changes

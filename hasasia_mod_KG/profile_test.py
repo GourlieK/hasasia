@@ -204,8 +204,8 @@ def hsen_pulsar_entry(psr:hsen.Pulsar, dir:str):
         hdf5_psr.create_dataset('theta', (1,), float, data=psr.theta)
         hdf5_psr.create_dataset('designmatrix', psr.designmatrix.shape, psr.designmatrix.dtype, data=psr.designmatrix)
         hdf5_psr.create_dataset('G', psr.G.shape, psr.G.dtype, data=psr.G)
-        da.to_hdf5(dir, f"{psr.name}/K_inv", psr.K_inv)   
-        #hdf5_psr.create_dataset('K_inv', psr.K_inv.shape, psr.K_inv.dtype, data=psr.K_inv)
+        #da.to_hdf5(dir, f"{psr.name}/K_inv", psr.K_inv)   
+        hdf5_psr.create_dataset('K_inv', psr.K_inv.shape, psr.K_inv.dtype, data=psr.K_inv)
         hdf5_psr.create_dataset('pdist', (2,), float, data=psr.pdist)
         f.flush()
         print(f'hasasia pulsar {psr.name} successfully saved to HDF5', end='\r')
@@ -539,7 +539,7 @@ if __name__ == '__main__':
     #max is 45 for 12yr dataset
     kill_count =  45
     #num_chains = 5
-    thin = 2
+    thin = 10
     #yr used for making WN correlation matrix, specifically when yr=15
     yr=12
     fyr = 1/(365.25*24*3600)
