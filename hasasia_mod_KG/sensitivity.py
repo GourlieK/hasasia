@@ -2,7 +2,8 @@
 from __future__ import print_function
 """Main module."""
 import numpy  as np
-import hasasia, jax
+import jax
+import dask.array as da
 from functools import cached_property
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
@@ -12,23 +13,20 @@ import scipy.stats as sps
 import scipy.linalg as sl
 import os, pickle, functools
 from astropy import units as u
-from enterprise.signals.gp_bases import createfourierdesignmatrix_red
 
-
-#os.environ["JAX_COMPILATION_CACHE_DIR"] = "/tmp/jax_cache"
-#jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
-#jax.config.update('jax_persistent_cache_min_compile_time_secs', 0)
-#from jax.experimental.compilation_cache import compilation_cache as cc
-#cc.set_cache_dir("/tmp/jax_cache")
+os.environ["JAX_COMPILATION_CACHE_DIR"] = "/tmp/jax_cache"
+jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
+jax.config.update('jax_persistent_cache_min_compile_time_secs', 0)
+from jax.experimental.compilation_cache import compilation_cache as cc
+cc.set_cache_dir("/tmp/jax_cache")
 
 
 #KG: changed from .utils
 from utils import create_design_matrix
 
 #KG: test imports and files
-import time
 from memory_profiler import profile 
-path = r'/home/gourliek/Desktop/Profile_Data'
+path = os.path.expanduser('~/Desktop/Profile_Data')
 #memory profile for Default NcalInv computation
 get_NcalInv_mem = open(path + '/NcalInv_mem.txt','w')
 #memory profile for Rank Redduced Formalism NcalInv computation
@@ -38,10 +36,8 @@ get_K_inv_mem = open(path + '/get_K_inv_mem.txt','w')
 #memory profile for computation of correlation matrix for the Red Noise, which is needed for default
 corr_from_psd_mem = open(path + '/corr_from_psd_mem.txt','w')
 
-
-
-current_path = os.path.abspath(hasasia.__path__[0])
-sc_dir = os.path.join(current_path,'sensitivity_curves/')
+#current_path = os.path.abspath(hasasia_clone.__path__[0])
+#sc_dir = os.path.join(current_path,'sensitivity_curves/')
 
 __all__ =['GWBSensitivityCurve',
           'DeterSensitivityCurve',
@@ -223,26 +219,29 @@ def resid_response(freqs):
     return 1/(12 * np.pi**2 * freqs**2)
 
 
-#@functools.partial(jax.jit, static_argnames=['full_matrix', 'return_Gtilde_Ncal'])
+
+@functools.partial(jax.jit, static_argnames=['full_matrix', 'return_Gtilde_Ncal'])
 def get_NcalInv_RRF(K_inv: jax.Array, G: jax.Array, phi:jax.Array, J: jax.Array,
                     Z: jax.Array, freqs: jax.Array, toas:jax.Array, full_matrix=False, return_Gtilde_Ncal=False):
     T = toas.max()-toas.min()
-    Sigma = jnp.matmul(Z, J) + jnp.linalg.inv(phi)
-    SigmaInv = jnp.linalg.inv(Sigma)
+    phi_inv = jnp.linalg.inv(phi)
+    del phi
 
-    del Sigma, phi
+    Sigma = (phi_inv + jnp.matmul(Z, J)).T
+    SigmaInv = jnp.linalg.inv(Sigma)
+    del Sigma
     
-    Gtilde = jnp.zeros((freqs.size,G.shape[1]),dtype='complex128')
+    Gtilde = jnp.zeros((freqs.size, G.shape[1]),dtype='complex128')
     Gtilde = jnp.dot(jnp.exp(1j*2*jnp.pi*freqs[:,jnp.newaxis]*toas),G)
 
-    NcalInv = (K_inv + jnp.matmul(Z.T, jnp.matmul(SigmaInv, Z))) / 2#divide by 2 for some reason   
+    NcalInv_ = K_inv - jnp.matmul(Z.T, jnp.matmul(SigmaInv, Z))#divide by 2 for some reason   
 
-    del SigmaInv, K_inv
+    del SigmaInv
     #divided by 4, not 2 for some reason, possibly some normalization stuff
-    TfN = jnp.matmul(jnp.conjugate(Gtilde),jnp.matmul(NcalInv,Gtilde.T)) / 2
+    TfN = jnp.matmul(jnp.conjugate(Gtilde),jnp.matmul(NcalInv_,Gtilde.T)) / 2
 
     if return_Gtilde_Ncal:
-        return jnp.real(TfN), Gtilde, jnp.linalg.inv(NcalInv)
+        return jnp.real(TfN), Gtilde, jnp.linalg.inv(NcalInv_)
     elif full_matrix:
         return jnp.real(TfN)
     else:
@@ -303,6 +302,7 @@ class Pulsar(object):
     def G(self):
         """Inverse Noise Weighted Transmission Function."""
         if not hasattr(self, '_G'):
+     
             self._G = G_matrix(designmatrix=self.designmatrix)
         return self._G
     
@@ -318,18 +318,14 @@ class Pulsar(object):
         Note that the computation of K_inv will remove the white noise covariance matrix.
         This will have the computation of the Transmission function, get_TfN not possible.
         """
-        L = sl.cholesky(self.N)        
+        L = jnp.linalg.cholesky(self.N)        
         A = jnp.matmul(L,self.G)
         del L
         K = jnp.matmul(A.T,A)
         del A
         return jnp.linalg.inv(K)
     
-  
 
-        
-
-#KG rrf changes
 class RRF_Spectrum(object):
     """Class to encode the spectral information for a single pulsar for use in Rank Reduced Formalism.
 
@@ -361,7 +357,7 @@ class RRF_Spectrum(object):
         Optionally supply an array of frequencies over which to build the
         various spectral densities.
     """
-    def __init__(self, psr, freqs_gw, amp_gw, gamma_gw, amp = None, gamma = None, nf=400, fmin=None,
+    def __init__(self, psr, freqs_gw, amp_gw, gamma_gw, freqs_rn, amp = None, gamma = None, nf=400, fmin=None,
                   fmax=2e-7, freqs=None,  tm_fit=True, **Tf_kwargs):
         self._H_0 = 72 * u.km / u.s / u.Mpc
         self.toas = psr.toas
@@ -376,10 +372,15 @@ class RRF_Spectrum(object):
         self.designmatrix = psr.designmatrix
         self.pdist = psr.pdist
 
+        #red noise frequencies
+        self.freqs_rn = freqs_rn
+
+        #intrinsic red noise psd parameters
         self.amp = amp
         self.gamma = gamma
 
-        self.freqs_gw = freqs_gw
+        #gwb frequencies and psd parameters
+        self.freqs_gwb = freqs_gw
         self.amp_gw = amp_gw
         self.gamma_gw = gamma_gw
 
@@ -428,50 +429,64 @@ class RRF_Spectrum(object):
     def Cirn(self):
         """Intrinsic Red Noise Covariance Matrix
         """
-        nf = self.freqs_gw.size
-        #for pulsars with no red noise power
+        nf =  self.freqs_rn.size
+        #For pulsars with no intrinsic red noise
         if self.gamma == None or self.amp == None:
             C_rn = np.zeros((2*nf, 2*nf))
         else:
             #creation of fourier coeffiecent covariance matrix, and computes inverse
-            C_rn_proto = red_noise_powerlaw(A=self.amp, gamma=self.gamma, freqs=self.freqs_gw)
+            C_rn_proto = red_noise_powerlaw(A=self.amp, gamma=self.gamma, freqs=self.freqs_rn)
             C_rn = np.zeros((2*nf, 2*nf))
             C_rn[::2, ::2] = np.diag(C_rn_proto)   #odd elements
             C_rn[1::2, 1::2] = np.diag(C_rn_proto) #even elements
             del C_rn_proto
-        return C_rn
+        return C_rn/get_Tspan([self])
     
     @cached_property
     def Cgw(self):
         """Gravitational Wave Red Noise Covariance Matrix
         """
-        nf = self.freqs_gw.size
-        C_gwb_proto = red_noise_powerlaw(A=self.amp_gw, gamma=self.gamma_gw, freqs=self.freqs_gw)
+        nf_gw = self.freqs_gwb.size
+        nf = self.freqs_rn.size
+
+        # Create a mask to create frequencies for gwb
+        mask = np.full(self.freqs_rn.size, False)
+        for i in range(nf):
+            for j in range(nf_gw):
+                if np.isclose(self.freqs_rn[i], self.freqs_gwb[j], rtol=1e-5, atol=0):
+                    mask[i] = True
+                    continue
+        #duplicates the mask for use of 2Nfreq formalism
+        mask_rp = np.repeat(mask, 2)
+
+        gwb_power = red_noise_powerlaw(A=self.amp_gw, gamma=self.gamma_gw, freqs=self.freqs_gwb)
+        C_gwbproto = np.zeros((2*nf_gw, 2*nf_gw))
+        C_gwbproto[::2, ::2] = np.diag(gwb_power)   #odd elements
+        C_gwbproto[1::2, 1::2] = np.diag(gwb_power) #even elements
+        del gwb_power
+
         C_gwb = np.zeros((2*nf, 2*nf))
-        C_gwb[::2, ::2] = np.diag(C_gwb_proto)   #odd elements
-        C_gwb[1::2, 1::2] = np.diag(C_gwb_proto) #even elements
-        del C_gwb_proto
-        return C_gwb
+        C_gwb[np.ix_(mask_rp, mask_rp)] = C_gwbproto
+        return C_gwb/get_Tspan([self])
     
+
     @cached_property
     def J(self):
-        nf = len(self.freqs_gw)
+        nf = self.freqs_rn.size
         N = len(self.toas)
         T = self.toas.max()-self.toas.min()
         
         #Fourier Design matrix
         F  = jnp.zeros((N, 2 * nf))
         f = jnp.arange(1, nf + 1) / T
-        F = F.at[:, ::2].set(jnp.sin(2 * jnp.pi * self.toas[:, None] * f[None, :]))
-        F = F.at[:, 1::2].set(jnp.cos(2 * jnp.pi * self.toas[:, None] * f[None, :]))
+        F = F.at[:, ::2].set(jnp.sin(2 * jnp.pi * self.toas[:, None] * f[None, :])) 
+        F = F.at[:, 1::2].set(jnp.cos(2 * jnp.pi * self.toas[:, None] * f[None, :])) 
         del f   
         return jnp.matmul(self.G.T, F)
     
     @cached_property
     def Z(self):
-         return jnp.matmul(self.J.T, self.K_inv)
-        
-
+        return jnp.matmul(self.J.T, self.K_inv)
     
     @cached_property
     @profile(stream = get_NcalInv_RFF_mem)
@@ -485,44 +500,17 @@ class RRF_Spectrum(object):
         Returns:, 
             _type_: _description_
         """
-        #Fourier Design matrix
-        #if not hasattr(self, '_NcalInv'):
-        #    K_inv = jnp.array(self.K_inv)
-        #    G = jnp.array(self.G)
-        #    J = jnp.array(self.J)
-        #    Z = jnp.array(self.Z)
-        #   freqs = jnp.array(self.freqs)
-        #   toas = jnp.array(self.toas)
-        T = self.toas.max()-self.toas.min()
-        phi = jnp.array(self.Cirn + self.Cgw)/T
-        #    self._NcalInv = get_NcalInv_RRF(K_inv, G, phi, J, Z, freqs, toas, full_matrix, return_Gtilde_Ncal)
-       
-        Sigma = jnp.matmul(self.Z, self.J) + jnp.linalg.inv(phi)
-        SigmaInv = jnp.linalg.inv(Sigma)
-
-        del Sigma
-        
-        Gtilde = jnp.zeros((self.freqs.size,self.G.shape[1]),dtype='complex128')
-        Gtilde = jnp.dot(jnp.exp(1j*2*jnp.pi*self.freqs[:,jnp.newaxis]*self.toas),self.G)
-
-        NcalInv_v1 = (self.K_inv - jnp.matmul(self.Z.T, jnp.matmul(SigmaInv, self.Z))) #divide by 2 for some reason   
-        NcalInv_v2 = jnp.linalg.inv(jnp.linalg.inv(self.K_inv) + jnp.matmul(self.J, jnp.matmul(phi, self.J.T)))
-        print(NcalInv_v2/NcalInv_v1)
-
-        del SigmaInv, self.K_inv
-        #divided by 4, not 2 for some reason, possibly some normalization stuff
-        TfN = jnp.matmul(jnp.conjugate(Gtilde),jnp.matmul(NcalInv_v2,Gtilde.T)) / 2
-
-        if return_Gtilde_Ncal:
-            return jnp.real(TfN), Gtilde, jnp.linalg.inv(NcalInv_v1)
-        elif full_matrix:
-            return jnp.real(TfN)
-        else:
-            return jnp.real(jnp.diag(TfN)) / T
-        
-        
-        
-    
+        if not hasattr(self, '_NcalInv'):
+            phi = jnp.array((self.Cgw + self.Cirn))
+            K_inv = jnp.array(self.K_inv)
+            G = jnp.array(self.G)
+            J = jnp.array(self.J)
+            Z = jnp.array(self.Z)
+            toas = jnp.array(self.toas)
+            freqs = jnp.array(self.freqs)
+            self._NcalInv = get_NcalInv_RRF(K_inv, G, phi, J,
+                    Z, freqs, toas, full_matrix=full_matrix, return_Gtilde_Ncal=return_Gtilde_Ncal)
+        return self._NcalInv
             
     @property
     def P_n(self):
@@ -630,7 +618,6 @@ class RRF_Spectrum(object):
         else:
             ff = f_gw
         red_noise = A**2*(ff/fyr)**(-gamma)/(12*np.pi**2) * yr_sec**3
-        self._psd_prefit += red_noise
         if vals:
             return red_noise
 

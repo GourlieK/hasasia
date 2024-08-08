@@ -1,22 +1,10 @@
 #Kyle Gourlie
 #7/23/2024
 #library imports
-
-import os, shutil
-#Memory Profile File Locations
-path = os.path.expanduser('~/Desktop/Profile_Data')
-try:
-    os.mkdir(path)
-except FileExistsError:
-    shutil.rmtree(path)
-    os.mkdir(path)
-    
-    
-import h5py, gc
+import os, shutil, psutil, time, threading, random, h5py, gc, glob, json, cProfile, pstats, jax
 import numpy as np
 import scipy.linalg as sl
 import matplotlib.pyplot as plt
-import glob, pickle, json, cProfile, pstats, os, time
 import matplotlib as mpl
 import healpy as hp
 import astropy.units as u
@@ -26,6 +14,35 @@ import astropy.constants as c
 #mpl.rcParams['text.usetex'] = True
 from enterprise.pulsar import Pulsar as ePulsar
 from memory_profiler import profile
+
+#Memory Profile File Locations
+path = os.path.expanduser('~/Desktop/Profile_Data')
+#creation of folder to store profile data
+try:
+    os.mkdir(path)
+except FileExistsError:
+    pass
+    #shutil.rmtree(path)
+    #os.mkdir(path)
+
+jax.config.update('jax_platform_name', 'cpu')
+from enterprise.pulsar import Pulsar as ePulsar
+from memory_profiler import profile
+
+def log_memory_usage(file_path:str):
+    """Function to save memory and time profile data at 0.5 second increments, and saves data to txt file
+
+    Args:
+        file_path (str): directory of text file
+    """
+    with open(file_path, 'a') as f:
+        while True:
+            timestamp = time.time()
+            memory_info = psutil.virtual_memory()
+            memory_usage = memory_info.used / (1024 ** 3)  # Convert bytes to GB
+            f.write(f"{timestamp},{memory_usage}\n")
+            f.flush()  
+            time.sleep(0.5)
 
 #hasasia imports that are modified so they can be benchmarked
 import sensitivity as hsen
@@ -58,23 +75,21 @@ class PseudoSpectraPulsar:
         self.designmatrix = designmatrix
 
 #white noise covariance matrix profile file
-corr_matrix_mem = open(path + '/corr_matrix_mem.txt','w')
+corr_matrix_mem = open(path + '/corr_matrix_mem.txt','a')
 #creation of hasasia pulsar
-hsen_psr_mem = open(path + '/psr_hsen_mem.txt','w')
+hsen_psr_mem = open(path + '/psr_hsen_mem.txt','a')
 #Rank Reduced Formalism creation of hasasia pulsar
-hsen_psr_RRF_mem= open(path + '/psr_hsen_mem_RRF.txt','w')
+hsen_psr_RRF_mem= open(path + '/psr_hsen_mem_RRF.txt','a')
 #
-hsen_psr_spec_mem = open(path + '/psr_hsen_spec_mem.txt','w')
+hsen_psr_spec_mem = open(path + '/psr_hsen_spec_mem.txt','a')
 #Rank Reduced Formalism creation of hasasia pulsar
-hsen_psr_RRF_spec_mem= open(path + '/psr_hsen_spec_mem_RRF.txt','w')
+hsen_psr_RRF_spec_mem= open(path + '/psr_hsen_spec_mem_RRF.txt','a')
 #Total time taken to generate each pulsar 
-time_inc_psr = open(path + '/psr_increm.txt','w')
-time_inc_specs = open(path + '/specs_increm.txt','w')
-Null_time_file = open(path + '/Null_time.txt','w')
+time_inc_psr = open(path + '/psr_increm.txt','a')
+#Total time taken to generate each spectrum
+time_inc_specs = open(path + '/specs_increm.txt','a')
 
-batch_time = open(path + '/Batch_time.txt','w')
-
-
+batch_time = open(path + '/Batch_time.txt','a')
 
 def get_psrname(file,name_sep='_'):
     """Function that grabs names of pulsars from parameter files
@@ -159,6 +174,7 @@ def enterprise_hdf5(ePsrs:list, noise:dict, yr:float, edir:str, thin):
     with h5py.File(edir, 'w') as f:
         Tspan_h5 = f.create_dataset('Tspan', (1,), float)
         Tspan_h5[:] = Tspan
+        #numpy array stored with placeholders so names can be indexed into it later, also storing strings as bytes
         name_list = np.array(['X' for _ in range(kill_count)], dtype=h5py.string_dtype(encoding='utf-8'))
         #pseudo while/for-loop designed to delete first entry
         i = 0
@@ -176,14 +192,13 @@ def enterprise_hdf5(ePsrs:list, noise:dict, yr:float, edir:str, thin):
             f.flush()
             del ePsrs[0]
             i+=1
-
+            #once all the pulsars are deleted, the length of the list is zero
             if len(ePsrs) == 0:
                 break
             
         f.create_dataset('names',data = name_list)
-        del ePsrs[:]
         f.flush()
-        gc.collect()
+        print('enterprise.pulsars successfully saved to HDF5\n')
 
 
 def hsen_pulsar_entry(psr:hsen.Pulsar, dir:str):
@@ -199,38 +214,7 @@ def hsen_pulsar_entry(psr:hsen.Pulsar, dir:str):
         hdf5_psr.create_dataset('K_inv', psr.K_inv.shape, psr.K_inv.dtype, data=psr.K_inv)
         hdf5_psr.create_dataset('pdist', (2,), float, data=psr.pdist)
         f.flush()
-
-@profile(stream=hsen_psr_mem)
-def hsen_pulsar_creation(pseudo:PseudoPulsar, hsen_dir:str):
-    """_summary_: create hasasia pulsar object using original method
-
-    Args:
-        pseudo (PseudoPulsar): PseudoPulsar object
-        hsen_dir (str): directory for storing hasasia pulsar object
-    """
-    start_time = time.time()
-    plaw = hsen.red_noise_powerlaw(A=A_gw, gamma=gam_gw, freqs=freqs)
-
-    #if red noise parameters for an individual pulsar is present, add it to standard red noise
-    if pseudo.name in rn_psrs.keys():
-        Amp, gam = rn_psrs[pseudo.name]
-        plaw += hsen.red_noise_powerlaw(A=Amp, gamma=gam, freqs=freqs)  #was +=
-
-    #adding red noise components to the noise covariance matrix via power spectral density
-    pseudo.N += hsen.corr_from_psd(freqs=freqs, psd=plaw,
-                                toas=pseudo.toas[::thin])   
-    #creating hasasia pulsar tobject 
-    psr = hsen.Pulsar(toas=pseudo.toas[::thin],
-                        toaerrs=pseudo.toaerrs[::thin],
-                        phi=pseudo.phi,theta=pseudo.theta, 
-                        N=pseudo.N, designmatrix=pseudo.Mmat[::thin,:], pdist=pseudo.pdist)
-    #setting name of hasasia pulsar
-    psr.name = pseudo.name
-    _ = psr.K_inv
-    end_time = time.time()
-    time_inc_psr.write(f"OG {psr.name} {start_time-null_time} {end_time-null_time}\n")
-    time_inc_psr.flush()
-    hsen_pulsar_entry(psr, hsen_dir)
+        print(f'hasasia pulsar {psr.name} successfully saved to HDF5', end='\r')
 
 @profile(stream=hsen_psr_RRF_mem)
 def hsen_pulsar_rrf_creation(pseudo: PseudoPulsar, hsen_dir_rrf:str):
@@ -251,31 +235,6 @@ def hsen_pulsar_rrf_creation(pseudo: PseudoPulsar, hsen_dir_rrf:str):
     time_inc_psr.write(f"RRF {psr.name} {start_time-null_time} {end_time-null_time}\n")
     time_inc_psr.flush()
     hsen_pulsar_entry(psr, hsen_dir_rrf)
-
-
-
-def hsen_pulsr_hdf5_entire(f:str, names_list:list, hsen_dir:str):
-    """_summary_: Function that goes through entire process of creating fake hasasia pulsar object, create hasasia pulsar object, and 
-    saves attributes to hdf5 file. Primary use of this function is to be not executed if already saved. This function is for the original
-    method
-
-    Args:
-        f (str): enterprise pulsar hdf5 directory
-        names_list (list): list of pulsar names
-        hsen_dir (str): pulsar hdf5 directory that will used to save the required attributes
-    """
-    for name in names_list:
-        psr = f[name]
-        pseudo = PseudoPulsar(toas=psr['toas'][:], toaerrs=psr['toaerrs'][:], phi = psr['phi'][:][0],
-                        theta = psr['theta'][:][0], pdist=psr['pdist'][:], N=psr['N'][:])
-        pseudo.name = name
-        pseudo.Mmat= psr['designmatrix'][:]
-
-        hsen_psr_mem.write(f'Pulsar: {name}\n')
-        hsen_psr_mem.flush()
-        hsen_pulsar_creation(pseudo, hsen_dir)
-        del pseudo
-
 
 def hsen_rrf_pulsar_hdf5_entire(f:str, names_list:list, hsen_dir_rrf:str):
     """_summary_: Function that goes through entire process of creating fake hasasia pulsar object, create hasasia pulsar object, and 
@@ -311,25 +270,20 @@ def hsen_spectrum_creation(pseudo:PseudoSpectraPulsar)->hsen.Spectrum:
     """
     start_time = time.time()
     spec_psr = hsen.Spectrum(pseudo, freqs=freqs)
-               
     spec_psr.name = pseudo.name
-    
+    #Calling computation of NcalInv, due to its high computational cost
     _ = spec_psr.NcalInv
     end_time = time.time()
     time_inc_specs.write(f"OG {spec_psr.name} {start_time-null_time} {end_time-null_time}\n")
     time_inc_specs.flush()
-    spec_psr.name = pseudo.name
-    print(f'Spectrum {spec_psr.name} created')
     return spec_psr
 
 @profile(stream=hsen_psr_RRF_spec_mem)
-def hsen_spectrum_creation_rrf(pseudo:PseudoSpectraPulsar, gam_gw:float, amp_gw:float)-> hsen.RRF_Spectrum:
+def hsen_spectrum_creation_rrf(pseudo:PseudoSpectraPulsar, gam_gw, A_gw)-> hsen.RRF_Spectrum:
     """_summary_: Creates Spectrum object using the rank-reduced method
 
     Args:
         pseudo (PseudoSpectraPulsar): fake spectrum pulsar that contains all needed attributes
-        gam_gw (float): spectral index for GWB
-        amp_gw (float): spectral amplitude for GWB
 
     Returns:
         hsen.RRF_Spectrum: spectrum object
@@ -337,21 +291,20 @@ def hsen_spectrum_creation_rrf(pseudo:PseudoSpectraPulsar, gam_gw:float, amp_gw:
     start_time = time.time()
     if pseudo.name in rn_psrs.keys():
         Amp, gam = rn_psrs[pseudo.name]
-        #creates spectrum hasasia pulsar to calculate characteristic straing
-        spec_psr = hsen.RRF_Spectrum(psr=pseudo, freqs_gw=freqs_gw,amp_gw=amp_gw, gamma_gw=gam_gw, amp = Amp, gamma = gam, freqs=freqs)
-    
+        #creates spectrum pulsar based on both instrinsic red noise and gravitational wave background
+        spec_psr = hsen.RRF_Spectrum(psr=pseudo, freqs_gw=freqs_gwb,amp_gw=A_gw, gamma_gw=gam_gw,
+                                     freqs_rn=freqs_rn, amp = Amp, gamma = gam, freqs=freqs)
     else:
-        #creates spectrum hasasia pulsar to calculate characteristic straing
-        spec_psr = hsen.RRF_Spectrum(pseudo, freqs=freqs, freqs_gw=freqs_gw,amp_gw=amp_gw, gamma_gw=gam_gw)
-    
+        #creates spectrum pulsar just based on gravitational wave background
+        spec_psr = hsen.RRF_Spectrum(psr=pseudo, freqs_gw=freqs_gwb,amp_gw=A_gw, gamma_gw=gam_gw,
+                                     freqs_rn=freqs_rn, freqs=freqs)
+        
     spec_psr.name = pseudo.name
-    
 
     _ = spec_psr.NcalInv
     end_time = time.time()
     time_inc_specs.write(f"RRF {spec_psr.name} {start_time-null_time} {end_time-null_time}\n")
     time_inc_specs.flush()
-    print(f'RRF Spectrum {spec_psr.name} created')
     return spec_psr
 
 
@@ -499,8 +452,6 @@ def yr_12_data():
     
     return pars, tims, noise, rn_psrs, edir, ephem
 
-
-
 def chains_puller(num: int):
     """_summary_: Reads generated chains from the 12.5 yr data, varying spectral index, 30 frequencies, from the DE438 ephemeris.
 
@@ -560,7 +511,6 @@ def sens_gen():
                 spec_psr_rrf = hsen_spectrum_creation_rrf(pseudo, gw_gam_samples[i], 10**gw_log10_A_samples[i])
                 specs_rrf.append(spec_psr_rrf)
                 
-        
         #creation of sensitivity curves rank-reduced method
         rrf_sc = hsen.GWBSensitivityCurve(specs_rrf)
         rrf_dsc = hsen.DeterSensitivityCurve(specs_rrf)
@@ -578,25 +528,39 @@ def sens_gen():
     batch_time.close()
 
 
+def sigma_grab(sigma:int):
+    dz = 0.01
+    input = np.arange(-sigma, sigma+dz, dz)
+    output = np.exp(-0.5*input**2)
+    sigma_val = np.trapz(y=output, x=input, dx=dz)/np.sqrt(2*np.pi)
+    lower = .5 - sigma_val/2
+    upper = .5 + sigma_val/2
+    return lower, upper
+
+
+
+
+
+
+
 if __name__ == '__main__':
     null_time = time.time()
-    Null_time_file.write(f'{null_time}\n')
-    Null_time_file.flush()
-    Null_time_file.close()
+    log_path = path+'/time_mem_data.txt'
+    #this will allow memory profile data to run in parallel with the rest of the program
+    logging_thread = threading.Thread(target=log_memory_usage, args=(log_path,))
+    logging_thread.daemon = True  # Ensure the thread will exit when the main program exits
+    logging_thread.start()
+
     ###################################################
     #max is 34 for 11yr dataset
     #max is 45 for 12yr dataset
-    kill_count = 45 
-    num_chains = 1
-    thin = 5
+    kill_count = 45
+    num_chains = 5
+    thin = 2
     #yr used for making WN correlation matrix, specifically when yr=15
     yr=12
     fyr = 1/(365.25*24*3600)
-    obs_freq_num = 30
-    #GWB parameters
-    
 
-   
     names_list = []
     with cProfile.Profile() as pr:
         #Realistic PTA datasets
@@ -613,9 +577,11 @@ if __name__ == '__main__':
         with h5py.File(edir, 'r') as f:
             #reading Tspan and creation of frequencies to observe
             Tspan = f['Tspan'][:][0]
-            freqs = np.logspace(np.log10(1/(5*Tspan)),np.log10(2e-7),200)
-            freqs_gw = np.arange(1/Tspan, (obs_freq_num+1)/Tspan, 1/Tspan)
-        
+
+            freqs = np.logspace(np.log10(1/(5*Tspan)),np.log10(2e-7),400)
+            freqs_rn = np.linspace(1/Tspan, 30/Tspan, 30)
+            freqs_gwb = np.linspace(1/Tspan, 14/Tspan, 14)
+
             #reading names encoded as bytes, and re-converting them to strings, and deleting byte names
             names = f['names'][:]
             for i in range(kill_count):
@@ -627,7 +593,7 @@ if __name__ == '__main__':
             if not os.path.isfile(hsen_dir_rrf):
                 hsen_rrf_pulsar_hdf5_entire(f, names_list, hsen_dir_rrf)
 
-        data_path = os.path.expanduser('~/h_c_data.hdf5')
+        data_path = os.path.expanduser(path+'/h_c_data.hdf5')
         if not os.path.isfile(data_path):
             sens_gen()
         
@@ -635,7 +601,7 @@ if __name__ == '__main__':
     with open(path + '/test_time.txt', 'w') as file:
         #saving cprofile data
         stats = pstats.Stats(pr, stream=file)
-        stats.sort_stats(pstats.SortKey.TIME, pstats.SortKey.CUMULATIVE)
+        stats.sort_stats(pstats.SortKey.TIME)
         stats.print_stats()
 
         h_sc_matrix = np.zeros((freqs.size, num_chains))
@@ -651,34 +617,113 @@ if __name__ == '__main__':
                 h_sc_matrix[:,i] = data['hc_sc'][:]
                 h_dsc_matrix[:,i] = data['hc_dsc'][:]
 
-        h_sc_min = []
-        h_sc_max = []
-        h_dsc_min = []
-        h_dsc_max = []
-        
-        for i in range(freqs.size):
-            h_sc_min.append(np.min(h_sc_matrix[i,:]))
-            h_sc_max.append(np.max(h_sc_matrix[i,:]))
-            h_dsc_min.append(np.min(h_dsc_matrix[i,:]))
-            h_dsc_max.append(np.max(h_dsc_matrix[i,:]))
+    h_sc_sigma_low = []
+    h_sc_med = []
+    h_sc_sigma_high = []
 
-        
-        plt.title(f'NANOGrav {yr}-year Data Set Sensitivity Curve')
-        plt.loglog(freqs, h_sc_min, label='min Stoch', lw=0.2, c='black')
-        plt.loglog(freqs, h_sc_max, label='max Stoch', lw=0.2, c='black')
-        plt.loglog(freqs, h_dsc_min, label='min Det', lw=0.2, c='red')
-        plt.loglog(freqs, h_dsc_max, label='max Det', lw=0.2, c='red')
+    h_dsc_sigma_low = []
+    h_dsc_med = []
+    h_dsc_sigma_high = []
 
-        plt.fill_between(freqs, h_sc_min, h_sc_max, color='gray')
-        plt.fill_between(freqs, h_dsc_min, h_dsc_max, color='orange')
+    low, high = sigma_grab(sigma=1)
+    
+    
+    for i in range(freqs.size):
+        h_sc_sigma_low.append(np.quantile(a=h_sc_matrix[i,:], q=low))
+        h_sc_med.append(np.median(h_sc_matrix[i,:]))
+        h_sc_sigma_high.append(np.quantile(a=h_sc_matrix[i,:], q=high))
 
-        #plt.loglog.fill_between(freqs, h_sc_min, h_sc_max)
-        plt.tight_layout()
-        plt.xlabel('Frequencies, Hz')
-        plt.ylabel('Characteristic Strain, $h_c$')
-        plt.grid(which='both')
-        plt.legend()
-        plt.savefig(path+'/sc_h_c.png')
-        plt.show()
+        h_dsc_sigma_low.append(np.quantile(a=h_dsc_matrix[i,:], q=low))
+        h_dsc_med.append(np.median(h_dsc_matrix[i,:]))
+        h_dsc_sigma_high.append(np.quantile(a=h_dsc_matrix[i,:], q=high))
+
+
+    plt.title(f'NANOGrav {yr}-year Data Set Sensitivity Curve')
+    plt.loglog(freqs, h_sc_med, label='Median Stoch', lw=0.2, c='black')
+    plt.loglog(freqs, h_dsc_med, label='Median Det', lw=0.2, c='red')
+    
+
+    plt.fill_between(freqs, h_sc_sigma_low, h_sc_sigma_high, color='gray', label='1$\sigma$ Stoch')
+    plt.fill_between(freqs, h_dsc_sigma_low, h_dsc_sigma_high, color='orange', label='1$\sigma$ Det')
+
+    
+    plt.tight_layout()
+    plt.xlabel('Frequencies, Hz')
+    plt.ylabel('Characteristic Strain, $h_c$')
+    plt.grid(which='both')
+    
+    plt.axvline(x=1/Tspan, label=r'$\frac{1}{\mathrm{Tspan}}$', c='blue', linestyle='--')
+    plt.axvline(x=14/Tspan, c='cyan', label=r'$\frac{14}{\mathrm{Tspan}}$', linestyle='--')
+    plt.axvline(x=30/Tspan, label=r'$\frac{30}{\mathrm{Tspan}}$', c='green', linestyle='--')
+    plt.legend()
+    plt.savefig(path+'/sc_h_c_sigma.png', dpi=1000)
+    plt.show()
+
+    plt.title(f'NANOGrav {yr}-year Data Set Sensitivity Curve')
+    for i in range(num_chains):
+        plt.loglog(freqs, h_sc_matrix[:,i], label='Stoch', c='black', lw=0.2)
+        plt.loglog(freqs, h_dsc_matrix[:,i], label='Det', c='black', lw=0.2)
+
+    plt.tight_layout()
+    plt.xlabel('Frequencies, Hz')
+    plt.ylabel('Characteristic Strain, $h_c$')
+    plt.grid(which='both')
+    
+    plt.axvline(x=1/Tspan, label=r'$\frac{1}{\mathrm{Tspan}}$', c='blue', linestyle='--')
+    plt.axvline(x=14/Tspan, c='cyan', label=r'$\frac{14}{\mathrm{Tspan}}$', linestyle='--')
+    plt.axvline(x=30/Tspan, label=r'$\frac{30}{\mathrm{Tspan}}$', c='green', linestyle='--')
+    #plt.legend()
+    plt.savefig(path+'/sc_h_c_total.png', dpi=1000)
+    plt.show()
+
+    
+    
+    bt_data = []
+    with open(path + '/Batch_time.txt', 'r') as file:
+        for line in file:
+            bt_data.append(float(line))
+
+    batch_num = [i+1 for i in range(len(bt_data))]
+    plt.figure(dpi=100)  # Set the DPI to 100 for better resolution
+    plt.bar(batch_num, bt_data, color='skyblue')
+
+    # Add labels and title
+    plt.xlabel('Batch Number')
+    plt.ylabel('Batch Time [s]')
+    plt.title('Batches vs Time')
+
+    #Show the bar chart
+    plt.tight_layout()
+    plt.savefig(path+'/Batch_time_psrs.png', dpi=1000)
+    plt.show()
+
+
+##############################MEMORY VS TIME PLOTTING START#################################################
+    #total memory vs time data
+    mem_data = []
+    time_data = []
+    with open(log_path, 'r') as file:  
+        for line in file:
+            line_sep = line.split(',')
+            time_data.append(float(line_sep[0]))
+            mem_data.append(float(line_sep[1]))
+
+    time_data = np.array(time_data)
+    time_data = time_data-null_time
+    mem_data = np.array(mem_data)
+    plt.style.use('dark_background')
+    plt.title('Memory vs Time')
+    plt.plot(time_data, mem_data, c='yellow')
+    plt.xlabel('Time (s)')
+    plt.ylabel('Virtual Memory (GB)')
+    plt.savefig(path+'/mem_time.png', dpi=1000)
+    plt.show()
+
+
+    hexadecimal_alphabets = '0123456789ABCDEF'
+    num_colors = len(names_list)
+    color = ["#" + ''.join([random.choice(hexadecimal_alphabets) for _ in range(6)]) for _ in range(num_colors)]
+##############################MEMORY VS TIME PLOTTING END#######################################################
+
 
    
