@@ -279,7 +279,7 @@ def hsen_spectrum_creation(pseudo:PseudoSpectraPulsar)->hsen.Spectrum:
     return spec_psr
 
 @profile(stream=hsen_psr_RRF_spec_mem)
-def hsen_spectrum_creation_rrf(pseudo:PseudoSpectraPulsar, gam_gw, A_gw)-> hsen.RRF_Spectrum:
+def hsen_spectrum_creation_rrf(pseudo:PseudoSpectraPulsar, gam_gw, A_gw, A_irn, gam_irn)-> hsen.RRF_Spectrum:
     """_summary_: Creates Spectrum object using the rank-reduced method
 
     Args:
@@ -289,16 +289,8 @@ def hsen_spectrum_creation_rrf(pseudo:PseudoSpectraPulsar, gam_gw, A_gw)-> hsen.
         hsen.RRF_Spectrum: spectrum object
     """
     start_time = time.time()
-    if pseudo.name in rn_psrs.keys():
-        Amp, gam = rn_psrs[pseudo.name]
-        #creates spectrum pulsar based on both instrinsic red noise and gravitational wave background
-        spec_psr = hsen.RRF_Spectrum(psr=pseudo, freqs_gw=freqs_gwb,amp_gw=A_gw, gamma_gw=gam_gw,
-                                     freqs_rn=freqs_rn, amp = Amp, gamma = gam, freqs=freqs)
-    else:
-        #creates spectrum pulsar just based on gravitational wave background
-        spec_psr = hsen.RRF_Spectrum(psr=pseudo, freqs_gw=freqs_gwb,amp_gw=A_gw, gamma_gw=gam_gw,
-                                     freqs_rn=freqs_rn, freqs=freqs)
-        
+    spec_psr = hsen.RRF_Spectrum(psr=pseudo, freqs_gw=freqs_gwb,amp_gw=A_gw, gamma_gw=gam_gw,
+                                     freqs_rn=freqs_rn, amp = A_irn, gamma = gam_irn, freqs=freqs)     
     spec_psr.name = pseudo.name
 
     _ = spec_psr.NcalInv
@@ -318,7 +310,6 @@ def yr_11_data():
         - psr_list (list): List of pulsars names
         - enterprise_Psrs (list): List of enterprise pulsars 
         - noise (dict): Noise parameters including fe/be of WN and RN.
-        - rn_psrs (dict): RN parameters where key is name of pulsar and value is list where 0th 
         index is spectral amplitude and 1st index is spectral index
         - Tspan: Total timespan of the PTA
         - enterprise_dir: specific directory name used for enterprise HDF5 file
@@ -359,22 +350,9 @@ def yr_11_data():
         with open(nf,'r') as fin:
             noise.update(json.load(fin))
 
-    rn_psrs = {'B1855+09':[10**-13.7707, 3.6081],      #
-           'B1937+21':[10**-13.2393, 2.46521],
-           'J0030+0451':[10**-14.0649, 4.15366],
-           'J0613-0200':[10**-13.1403, 1.24571],
-           'J1012+5307':[10**-12.6833, 0.975424],
-           'J1643-1224':[10**-12.245, 1.32361],
-           'J1713+0747':[10**-14.3746, 3.06793],
-           'J1747-4036':[10**-12.2165, 1.40842],
-           'J1903+0327':[10**-12.2461, 2.16108],
-           'J1909-3744':[10**-13.9429, 2.38219],
-           'J2145-0750':[10**-12.6893, 1.32307],
-           }
-
     edir = '/home/gourliek/11_yr_enterprise_pulsars.hdf5'
     ephem = 'DE436'
-    return pars, tims, noise, rn_psrs, edir, ephem
+    return pars, tims, noise, edir, ephem
 
 def yr_12_data():
     """Creates enterprise pulsars from the 12.5 yr dataset from parameter and timing files.
@@ -386,7 +364,6 @@ def yr_12_data():
         - psr_list (list): List of pulsars names
         - enterprise_Psrs (list): List of enterprise pulsars 
         - noise (dict): Noise parameters including fe/be of WN and RN.
-        - rn_psrs (dict): RN parameters where key is name of pulsar and value is list where 0th 
         index is spectral amplitude and 1st index is spectral index
         - Tspan: Total timespan of the PTA
         - enterprise_dir: specific directory name used for enterprise HDF5 file
@@ -428,75 +405,63 @@ def yr_12_data():
     with open(noise_file, 'r') as fp:
         noise.update(json.load(fp))
 
-    #initialize dictionary list with placeholders where parameters for rn will be held
-    rn_psrs = {}
-    for name in psr_list:
-        amp_key = name + '_red_noise_log10_A'
-        gamma_key = name + '_red_noise_gamma'
-        for key in noise:
-            if key == amp_key or key == gamma_key:
-                rn_psrs[name] = ['x','x']
-    
-    #place proper entries
-    for name in psr_list:
-        amp_key = name + '_red_noise_log10_A'
-        gamma_key = name + '_red_noise_gamma'
-        for key in noise:
-            if key == amp_key:
-                rn_psrs[name][0] = 10**noise[amp_key]  #because parameter is log_10()
-            elif key == gamma_key:
-                rn_psrs[name][1] = noise[gamma_key]
-
     edir = '/home/gourliek/12_yr_enterprise_pulsars.hdf5'
     ephem = 'DE438'
     
-    return pars, tims, noise, rn_psrs, edir, ephem
+    return pars, tims, noise, edir, ephem
 
-def chains_puller(num: int):
+def chains_puller(num: int, names_list:list):
     """_summary_: Reads generated chains from the 12.5 yr data, varying spectral index, 30 frequencies, from the DE438 ephemeris.
 
     Resource: https://nanograv.org/science/data/125-year-stochastic-gravitational-wave-background-search
 
     Args:
         num (int): number of random samples
+        names_list (list): List of pulsar names
 
     Returns:
-        Two numpy arrays containing the random samples
+        Two dictionaries containing instrinsic red noise parameters
     """
     chain_path = os.path.expanduser('~/Nanograv/12p5yr_varying_sp_ind_30freqs/12p5yr_DE438_model2a_cRN30freq_gammaVary_chain.hdf5')
     with h5py.File(chain_path, 'r') as chainf:
+        
         params = chainf['params'][:]
         samples = np.array(chainf['samples'][:])
         
+        
     list_params = [item.decode('utf-8') for item in params]
-    
-    gw_log10_A_ind = list_params.index('gw_log10_A')
-    gw_gamma_ind = list_params.index('gw_gamma')
+    list_params.remove('gw_gamma')
+    list_params.remove('gw_log10_A')
+    irn_params_log10_A = {}
+    irn_params_gam = {}
 
-    gw_log10_A_samples = samples[30000:,gw_log10_A_ind]
-    gw_gamma_samples = samples[30000:,gw_gamma_ind]
-    
-    rand_samples_ind = np.random.choice(a=gw_log10_A_samples.shape[0], size=num, replace=False)
-    
-    return gw_log10_A_samples[rand_samples_ind], gw_gamma_samples[rand_samples_ind]
+    for name in names_list:
+        log10_A_ind = list_params.index(name+'_red_noise_log10_A')
+        gamma_ind = list_params.index(name+'_red_noise_gamma')
+        log10_A_samples = samples[30000:,log10_A_ind]
+        gamma_samples = samples[30000:,gamma_ind]
+        rand_samples_ind = np.random.choice(a=log10_A_samples.shape[0], size=num, replace=False)
+        irn_params_log10_A[name] = log10_A_samples[rand_samples_ind]
+        irn_params_gam[name] = gamma_samples[rand_samples_ind]
+
+    return irn_params_log10_A, irn_params_gam
 
 
 def save_h_c(data_path, hc_dsc, hc_sc, a_gw, gam_gw, freqs, batch_num: int): 
     with h5py.File(data_path, 'a') as f:
         hdf5 = f.create_group(f'batch_{batch_num}')
-        hdf5.create_dataset('A_gw', (1,), float, data=a_gw)
-        hdf5.create_dataset('gam_gw', (1,), float, data=gam_gw)
+        hdf5.create_dataset('A_irn', (1,), float, data=a_gw)
+        hdf5.create_dataset('gam_irn', (1,), float, data=gam_gw)
         hdf5.create_dataset('hc_dsc', hc_dsc.shape, hc_dsc.dtype, data=hc_dsc)
         hdf5.create_dataset('hc_sc', hc_sc.shape, hc_sc.dtype, data=hc_sc)
         hdf5.create_dataset('freqs', freqs.shape, freqs.dtype, data=freqs)
         f.flush()
 
 def sens_gen():
-    gw_log10_A_samples, gw_gam_samples = chains_puller(num_chains)
+    log10_A_samples, gam_samples = chains_puller(num_chains, names_list)
     for i in range(num_chains):
         time_start_bt = time.time()
-        print(f'GWB Spectral Index:{gw_gam_samples[i]}')
-        print(f'GWB Spectral Amplitude:{10**gw_log10_A_samples[i]}')
+        
         #reading hdf5 file containing hasasia pulsar attributes from rank-reduced method to create list of spectrum objects     
         with h5py.File(hsen_dir_rrf,'r') as hsenfrrf:
             specs_rrf = []
@@ -506,9 +471,13 @@ def sens_gen():
                                         theta = psr['theta'][:][0], pdist=psr['pdist'][:], K_inv=psr['K_inv'][:], G=psr['G'][:],
                                         designmatrix=psr['designmatrix'])
                 pseudo.name = name
+                psr_log10_A = log10_A_samples[pseudo.name][i]
+                psr_gam = gam_samples[pseudo.name][i]
+                print(f'IRN Spectral Index:{psr_gam}')
+                print(f'IRN Spectral Amplitude:{10**psr_log10_A}')
                 hsen_psr_RRF_spec_mem.write(f'Pulsar: {name}\n')
                 hsen_psr_RRF_spec_mem.flush()
-                spec_psr_rrf = hsen_spectrum_creation_rrf(pseudo, gw_gam_samples[i], 10**gw_log10_A_samples[i])
+                spec_psr_rrf = hsen_spectrum_creation_rrf(pseudo, gam_gw=gam_gw, A_gw= A_gw, A_irn=10**psr_log10_A, gam_irn=psr_gam)
                 specs_rrf.append(spec_psr_rrf)
                 
         #creation of sensitivity curves rank-reduced method
@@ -516,7 +485,7 @@ def sens_gen():
         rrf_dsc = hsen.DeterSensitivityCurve(specs_rrf)
         del specs_rrf
         save_h_c(data_path, rrf_dsc.h_c, rrf_sc.h_c,
-                    10**gw_log10_A_samples[i], gw_gam_samples[i], rrf_sc.freqs, i)
+                    10**psr_log10_A, psr_gam, rrf_sc.freqs, i)
         del rrf_sc
         del rrf_dsc
         print()
@@ -540,9 +509,6 @@ def sigma_grab(sigma:int):
 
 
 
-
-
-
 if __name__ == '__main__':
     null_time = time.time()
     log_path = path+'/time_mem_data.txt'
@@ -555,8 +521,11 @@ if __name__ == '__main__':
     #max is 34 for 11yr dataset
     #max is 45 for 12yr dataset
     kill_count = 45
-    num_chains = 5
-    thin = 2
+    num_chains = 50
+    thin = 5
+    A_gw = 1.73e-15
+    gam_gw = 13/3
+
     #yr used for making WN correlation matrix, specifically when yr=15
     yr=12
     fyr = 1/(365.25*24*3600)
@@ -564,8 +533,8 @@ if __name__ == '__main__':
     names_list = []
     with cProfile.Profile() as pr:
         #Realistic PTA datasets
-        #pars, tims, noise, rn_psrs, edir, ephem = yr_11_data()
-        pars, tims, noise, rn_psrs, edir, ephem = yr_12_data()
+        #pars, tims, noise, edir, ephem = yr_11_data()
+        pars, tims, noise, edir, ephem = yr_12_data()
 
         #if file does not exist, then re-compute it
         if not os.path.isfile(edir):
