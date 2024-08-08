@@ -1667,24 +1667,24 @@ def make_quant(param, default_unit):
     return quantity
 
 ################## Pre-Made Sensitivity Curves#############
-def nanograv_11yr_deter():
-    '''
-    Returns a `DeterSensitivityCurve` object built using with the NANOGrav
-    11-year data set.
-    '''
-    path = sc_dir + 'nanograv_11yr_deter.sc'
-    with open(path, "rb") as fin:
-        sc = pickle.load(fin)
-        sc.filepath = path
-    return sc
+#def nanograv_11yr_deter():
+#    '''
+#    Returns a `DeterSensitivityCurve` object built using with the NANOGrav
+#    11-year data set.
+#    '''
+#    path = sc_dir + 'nanograv_11yr_deter.sc'
+#    with open(path, "rb") as fin:
+#        sc = pickle.load(fin)
+#        sc.filepath = path
+#    return sc
 
-def nanograv_11yr_stoch():
-    '''
-    Returns a `GWBSensitivityCurve` object built using with the NANOGrav 11-year
-    data set.
-    '''
-    path = sc_dir + 'nanograv_11yr_stoch.sc'
-    with open(path, "rb") as fin:
-        sc = pickle.load(fin)
-        sc.filepath = path
-    return sc
+#def nanograv_11yr_stoch():
+#    '''
+#    Returns a `GWBSensitivityCurve` object built using with the NANOGrav 11-year
+#    data set.
+#    '''
+#    path = sc_dir + 'nanograv_11yr_stoch.sc'
+#    with open(path, "rb") as fin:
+#        sc = pickle.load(fin)
+#        sc.filepath = path
+#    return sc
