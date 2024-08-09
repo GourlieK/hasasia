@@ -2,8 +2,8 @@
 from __future__ import print_function
 """Main module."""
 import numpy  as np
-import jax
 import dask.array as da
+import hasasia, jax, functools
 from functools import cached_property
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
@@ -11,7 +11,7 @@ import jax.scipy as jsc
 import itertools as it
 import scipy.stats as sps
 import scipy.linalg as sl
-import os, pickle, functools
+import os, pickle
 from astropy import units as u
 
 os.environ["JAX_COMPILATION_CACHE_DIR"] = "/tmp/jax_cache"
@@ -20,13 +20,12 @@ jax.config.update('jax_persistent_cache_min_compile_time_secs', 0)
 from jax.experimental.compilation_cache import compilation_cache as cc
 cc.set_cache_dir("/tmp/jax_cache")
 
-
 #KG: changed from .utils
 from utils import create_design_matrix
 
 #KG: test imports and files
 from memory_profiler import profile 
-path = os.path.expanduser('~/Desktop/Profile_Data')
+path = r'/home/gourliek/Desktop/Profile_Data'
 #memory profile for Default NcalInv computation
 get_NcalInv_mem = open(path + '/NcalInv_mem.txt','w')
 #memory profile for Rank Redduced Formalism NcalInv computation
@@ -36,8 +35,8 @@ get_K_inv_mem = open(path + '/get_K_inv_mem.txt','w')
 #memory profile for computation of correlation matrix for the Red Noise, which is needed for default
 corr_from_psd_mem = open(path + '/corr_from_psd_mem.txt','w')
 
-#current_path = os.path.abspath(hasasia_clone.__path__[0])
-#sc_dir = os.path.join(current_path,'sensitivity_curves/')
+current_path = os.path.abspath(hasasia.__path__[0])
+sc_dir = os.path.join(current_path,'sensitivity_curves/')
 
 __all__ =['GWBSensitivityCurve',
           'DeterSensitivityCurve',
@@ -248,6 +247,7 @@ def get_NcalInv_RRF(K_inv: jax.Array, G: jax.Array, phi:jax.Array, J: jax.Array,
         return jnp.real(jnp.diag(TfN)) / T
 
 
+
 class Pulsar(object):
     """
     Class to encode information about individual pulsars.
@@ -302,7 +302,6 @@ class Pulsar(object):
     def G(self):
         """Inverse Noise Weighted Transmission Function."""
         if not hasattr(self, '_G'):
-     
             self._G = G_matrix(designmatrix=self.designmatrix)
         return self._G
     
@@ -318,7 +317,7 @@ class Pulsar(object):
         Note that the computation of K_inv will remove the white noise covariance matrix.
         This will have the computation of the Transmission function, get_TfN not possible.
         """
-        L = jnp.linalg.cholesky(self.N)        
+        L = jsc.linalg.cholesky(self.N)        
         A = jnp.matmul(L,self.G)
         del L
         K = jnp.matmul(A.T,A)
@@ -326,6 +325,7 @@ class Pulsar(object):
         return jnp.linalg.inv(K)
     
 
+#KG rrf changes
 class RRF_Spectrum(object):
     """Class to encode the spectral information for a single pulsar for use in Rank Reduced Formalism.
 
@@ -450,15 +450,9 @@ class RRF_Spectrum(object):
         nf = self.freqs_rn.size
 
         # Create a mask to create frequencies for gwb
-        mask = np.full(self.freqs_rn.size, False)
-        for i in range(nf):
-            for j in range(nf_gw):
-                if np.isclose(self.freqs_rn[i], self.freqs_gwb[j], rtol=1e-5, atol=0):
-                    mask[i] = True
-                    continue
-        #duplicates the mask for use of 2Nfreq formalism
-        mask_rp = np.repeat(mask, 2)
-
+        mask = np.isin(self.freqs_rn, self.freqs_gwb)
+        mask= np.repeat(mask, 2)
+      
         gwb_power = red_noise_powerlaw(A=self.amp_gw, gamma=self.gamma_gw, freqs=self.freqs_gwb)
         C_gwbproto = np.zeros((2*nf_gw, 2*nf_gw))
         C_gwbproto[::2, ::2] = np.diag(gwb_power)   #odd elements
@@ -466,7 +460,9 @@ class RRF_Spectrum(object):
         del gwb_power
 
         C_gwb = np.zeros((2*nf, 2*nf))
-        C_gwb[np.ix_(mask_rp, mask_rp)] = C_gwbproto
+
+        masked_indices = np.where(mask)[0]
+        C_gwb[np.ix_(masked_indices, masked_indices)] = C_gwbproto
         return C_gwb/get_Tspan([self])
     
 
@@ -484,10 +480,12 @@ class RRF_Spectrum(object):
         del f   
         return jnp.matmul(self.G.T, F)
     
+
     @cached_property
     def Z(self):
         return jnp.matmul(self.J.T, self.K_inv)
     
+
     @cached_property
     @profile(stream = get_NcalInv_RFF_mem)
     def NcalInv(self, full_matrix=False, return_Gtilde_Ncal=False):
@@ -500,17 +498,31 @@ class RRF_Spectrum(object):
         Returns:, 
             _type_: _description_
         """
-        if not hasattr(self, '_NcalInv'):
-            phi = jnp.array((self.Cgw + self.Cirn))
-            K_inv = jnp.array(self.K_inv)
-            G = jnp.array(self.G)
-            J = jnp.array(self.J)
-            Z = jnp.array(self.Z)
-            toas = jnp.array(self.toas)
-            freqs = jnp.array(self.freqs)
-            self._NcalInv = get_NcalInv_RRF(K_inv, G, phi, J,
-                    Z, freqs, toas, full_matrix=full_matrix, return_Gtilde_Ncal=return_Gtilde_Ncal)
-        return self._NcalInv
+        #Defining Ncal and NcalInv depending on existence of self.N or self.K_inv
+        T = self.toas.max()-self.toas.min()
+        phi = (self.Cgw + self.Cirn)
+        phi_inv = jnp.linalg.inv(phi)
+        del phi
+
+        Sigma = (phi_inv + jnp.matmul(self.Z, self.J)).T
+        SigmaInv = jnp.linalg.inv(Sigma)
+        del Sigma
+        
+        Gtilde = jnp.zeros((self.freqs.size,self.G.shape[1]),dtype='complex128')
+        Gtilde = jnp.dot(jnp.exp(1j*2*jnp.pi*self.freqs[:,jnp.newaxis]*self.toas),self.G)
+
+        NcalInv_ = self.K_inv - jnp.matmul(self.Z.T, jnp.matmul(SigmaInv, self.Z))#divide by 2 for some reason   
+
+        del SigmaInv
+        #divided by 4, not 2 for some reason, possibly some normalization stuff
+        TfN = jnp.matmul(jnp.conjugate(Gtilde),jnp.matmul(NcalInv_,Gtilde.T)) / 2
+
+        if return_Gtilde_Ncal:
+            return jnp.real(TfN), Gtilde, jnp.linalg.inv(NcalInv_)
+        elif full_matrix:
+            return jnp.real(TfN)
+        else:
+            return jnp.real(jnp.diag(TfN)) / T
             
     @property
     def P_n(self):
@@ -776,7 +788,6 @@ class Spectrum(object):
             NcalInv= np.linalg.inv(Ncal)
         else:
             NcalInv = self.K_inv 
-
         toas = self.toas
         freqs = self.freqs
         Gmatrix = self.G
@@ -1667,24 +1678,24 @@ def make_quant(param, default_unit):
     return quantity
 
 ################## Pre-Made Sensitivity Curves#############
-#def nanograv_11yr_deter():
-#    '''
-#    Returns a `DeterSensitivityCurve` object built using with the NANOGrav
-#    11-year data set.
-#    '''
-#    path = sc_dir + 'nanograv_11yr_deter.sc'
-#    with open(path, "rb") as fin:
-#        sc = pickle.load(fin)
-#        sc.filepath = path
-#    return sc
+def nanograv_11yr_deter():
+    '''
+    Returns a `DeterSensitivityCurve` object built using with the NANOGrav
+    11-year data set.
+    '''
+    path = sc_dir + 'nanograv_11yr_deter.sc'
+    with open(path, "rb") as fin:
+        sc = pickle.load(fin)
+        sc.filepath = path
+    return sc
 
-#def nanograv_11yr_stoch():
-#    '''
-#    Returns a `GWBSensitivityCurve` object built using with the NANOGrav 11-year
-#    data set.
-#    '''
-#    path = sc_dir + 'nanograv_11yr_stoch.sc'
-#    with open(path, "rb") as fin:
-#        sc = pickle.load(fin)
-#        sc.filepath = path
-#    return sc
+def nanograv_11yr_stoch():
+    '''
+    Returns a `GWBSensitivityCurve` object built using with the NANOGrav 11-year
+    data set.
+    '''
+    path = sc_dir + 'nanograv_11yr_stoch.sc'
+    with open(path, "rb") as fin:
+        sc = pickle.load(fin)
+        sc.filepath = path
+    return sc
