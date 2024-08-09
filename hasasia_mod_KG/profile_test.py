@@ -9,21 +9,17 @@ import matplotlib as mpl
 import healpy as hp
 import astropy.units as u
 import astropy.constants as c
-#mpl.rcParams['figure.dpi'] = 300
-#mpl.rcParams['figure.figsize'] = [5,3]
-#mpl.rcParams['text.usetex'] = True
 from enterprise.pulsar import Pulsar as ePulsar
 from memory_profiler import profile
 
 #Memory Profile File Locations
 path = os.path.expanduser('~/Desktop/Profile_Data')
 #creation of folder to store profile data
+#DONT delete automatically because contains h_c data
 try:
     os.mkdir(path)
 except FileExistsError:
     pass
-    #shutil.rmtree(path)
-    #os.mkdir(path)
 
 jax.config.update('jax_platform_name', 'cpu')
 from enterprise.pulsar import Pulsar as ePulsar
@@ -48,8 +44,7 @@ def log_memory_usage(file_path:str):
 import sensitivity as hsen
 import sim as hsim
 import skymap as hsky
-#needed to profile within sensitivity library
-#from sensitivity import get_NcalInv_mem, get_NcalInv_RFF_mem, corr_from_psd_mem
+from sensitivity import get_NcalInv_mem, get_NcalInv_RFF_mem, corr_from_psd_mem
 
 class PseudoPulsar:
     """Quick class to store data from HDF5 file in prep for hasasia pulsar creation"""
@@ -268,6 +263,8 @@ def hsen_spectrum_creation(pseudo:PseudoSpectraPulsar)->hsen.Spectrum:
     Returns:
         hsen.Spectrum: spectrum object
     """
+    get_NcalInv_mem.write(f'{pseudo.name}\n')
+    get_NcalInv_mem.flush()
     start_time = time.time()
     spec_psr = hsen.Spectrum(pseudo, freqs=freqs)
     spec_psr.name = pseudo.name
@@ -288,6 +285,8 @@ def hsen_spectrum_creation_rrf(pseudo:PseudoSpectraPulsar, gam_gw, A_gw)-> hsen.
     Returns:
         hsen.RRF_Spectrum: spectrum object
     """
+    get_NcalInv_RFF_mem.write(f'{pseudo.name}\n')
+    get_NcalInv_RFF_mem.flush()
     start_time = time.time()
     if pseudo.name in rn_psrs.keys():
         Amp, gam = rn_psrs[pseudo.name]
@@ -469,16 +468,26 @@ def chains_puller(num: int):
         samples = np.array(chainf['samples'][:])
         
     list_params = [item.decode('utf-8') for item in params]
+
+    lnpost = samples[:,-4]
+    lnlike = samples[:,-3]
+    chain_accept = samples[:,-2]
+    pt_chain_accept = samples[:,-1]
+    
+    lnpost_max_prob_ind = np.argmax(lnpost)
     
     gw_log10_A_ind = list_params.index('gw_log10_A')
     gw_gamma_ind = list_params.index('gw_gamma')
 
     gw_log10_A_samples = samples[30000:,gw_log10_A_ind]
     gw_gamma_samples = samples[30000:,gw_gamma_ind]
+
+    gw_log10_A_max_lnlike = samples[lnpost_max_prob_ind, gw_log10_A_ind]
+    gw_gamma_max_lnlike = samples[lnpost_max_prob_ind, gw_gamma_ind]
     
     rand_samples_ind = np.random.choice(a=gw_log10_A_samples.shape[0], size=num, replace=False)
     
-    return gw_log10_A_samples[rand_samples_ind], gw_gamma_samples[rand_samples_ind]
+    return gw_log10_A_samples[rand_samples_ind], gw_log10_A_max_lnlike, gw_gamma_samples[rand_samples_ind], gw_gamma_max_lnlike
 
 
 def save_h_c(data_path, hc_dsc, hc_sc, a_gw, gam_gw, freqs, batch_num: int): 
@@ -492,7 +501,8 @@ def save_h_c(data_path, hc_dsc, hc_sc, a_gw, gam_gw, freqs, batch_num: int):
         f.flush()
 
 def sens_gen():
-    gw_log10_A_samples, gw_gam_samples = chains_puller(num_chains)
+    gw_log10_A_samples, gw_log10_A_max, gw_gam_samples, gw_gamma_max = chains_puller(num_chains)
+    del gw_log10_A_max, gw_gamma_max
     for i in range(num_chains):
         time_start_bt = time.time()
         print(f'GWB Spectral Index:{gw_gam_samples[i]}')
@@ -527,6 +537,32 @@ def sens_gen():
         batch_time.flush()
     batch_time.close()
 
+    #max posterior params values
+    
+
+def lnpost_max_run():
+    gw_log10_A_samples, gw_log10_A_max, gw_gam_samples, gw_gamma_max = chains_puller(num_chains)
+    del gw_log10_A_samples, gw_gam_samples
+    with h5py.File(hsen_dir_rrf,'r') as hsenfrrf:
+        specs_rrf = []
+        for name in names_list:
+            psr = hsenfrrf[name]
+            pseudo = PseudoSpectraPulsar(toas=psr['toas'][:], toaerrs=psr['toaerrs'][:], phi = psr['phi'][:][0],
+                                    theta = psr['theta'][:][0], pdist=psr['pdist'][:], K_inv=psr['K_inv'][:], G=psr['G'][:],
+                                    designmatrix=psr['designmatrix'])
+            pseudo.name = name
+            hsen_psr_RRF_spec_mem.write(f'Pulsar: {name}\n')
+            hsen_psr_RRF_spec_mem.flush()
+            spec_psr_rrf = hsen_spectrum_creation_rrf(pseudo, gw_gamma_max, 10**gw_log10_A_max)
+            specs_rrf.append(spec_psr_rrf)
+                
+                #creation of sensitivity curves rank-reduced method
+    rrf_sc_maxpost = hsen.GWBSensitivityCurve(specs_rrf)
+    rrf_dsc_maxpost = hsen.DeterSensitivityCurve(specs_rrf)
+    del specs_rrf
+    return rrf_sc_maxpost.h_c, rrf_dsc_maxpost.h_c
+    
+
 
 def sigma_grab(sigma:int):
     dz = 0.01
@@ -536,11 +572,6 @@ def sigma_grab(sigma:int):
     lower = .5 - sigma_val/2
     upper = .5 + sigma_val/2
     return lower, upper
-
-
-
-
-
 
 
 if __name__ == '__main__':
@@ -555,8 +586,8 @@ if __name__ == '__main__':
     #max is 34 for 11yr dataset
     #max is 45 for 12yr dataset
     kill_count = 45
-    num_chains = 5
-    thin = 2
+    num_chains = 50
+    thin = 10
     #yr used for making WN correlation matrix, specifically when yr=15
     yr=12
     fyr = 1/(365.25*24*3600)
@@ -596,6 +627,8 @@ if __name__ == '__main__':
         data_path = os.path.expanduser(path+'/h_c_data.hdf5')
         if not os.path.isfile(data_path):
             sens_gen()
+
+        rrf_sc_maxpost_h_c, rrf_dsc_maxpost_h_c = lnpost_max_run()
         
 
     with open(path + '/test_time.txt', 'w') as file:
@@ -639,8 +672,12 @@ if __name__ == '__main__':
 
 
     plt.title(f'NANOGrav {yr}-year Data Set Sensitivity Curve')
-    plt.loglog(freqs, h_sc_med, label='Median Stoch', lw=0.2, c='black')
-    plt.loglog(freqs, h_dsc_med, label='Median Det', lw=0.2, c='red')
+    plt.loglog(freqs, h_sc_med, label='Median Stoch', lw=1, c='black')
+    plt.loglog(freqs, h_dsc_med, label='Median Det', lw=1, c='red')
+    plt.loglog(freqs, rrf_sc_maxpost_h_c, label='Max lnPost Stoch', lw=1, c='blue', linestyle='dotted')
+    plt.loglog(freqs, rrf_dsc_maxpost_h_c, label='Max lnPost Det', lw=1, c='black', linestyle='dotted')
+
+    #rrf_sc_maxpost_h_c, rrf_dsc_maxpost_h_c
     
 
     plt.fill_between(freqs, h_sc_sigma_low, h_sc_sigma_high, color='gray', label='1$\sigma$ Stoch')
@@ -661,8 +698,8 @@ if __name__ == '__main__':
 
     plt.title(f'NANOGrav {yr}-year Data Set Sensitivity Curve')
     for i in range(num_chains):
-        plt.loglog(freqs, h_sc_matrix[:,i], label='Stoch', c='black', lw=0.2)
-        plt.loglog(freqs, h_dsc_matrix[:,i], label='Det', c='black', lw=0.2)
+        plt.loglog(freqs, h_sc_matrix[:,i], c='black', lw=0.2)
+        plt.loglog(freqs, h_dsc_matrix[:,i], c='black', lw=0.2)
 
     plt.tight_layout()
     plt.xlabel('Frequencies, Hz')
@@ -672,7 +709,9 @@ if __name__ == '__main__':
     plt.axvline(x=1/Tspan, label=r'$\frac{1}{\mathrm{Tspan}}$', c='blue', linestyle='--')
     plt.axvline(x=14/Tspan, c='cyan', label=r'$\frac{14}{\mathrm{Tspan}}$', linestyle='--')
     plt.axvline(x=30/Tspan, label=r'$\frac{30}{\mathrm{Tspan}}$', c='green', linestyle='--')
-    #plt.legend()
+    plt.loglog(freqs, rrf_sc_maxpost_h_c, label='Max lnPost Stoch', lw=1, c='blue', linestyle='dotted')
+    plt.loglog(freqs, rrf_dsc_maxpost_h_c, label='Max lnPost Det', lw=1, c='black', linestyle='dotted')
+    plt.legend()
     plt.savefig(path+'/sc_h_c_total.png', dpi=1000)
     plt.show()
 
@@ -719,11 +758,6 @@ if __name__ == '__main__':
     plt.savefig(path+'/mem_time.png', dpi=1000)
     plt.show()
 
-
-    hexadecimal_alphabets = '0123456789ABCDEF'
-    num_colors = len(names_list)
-    color = ["#" + ''.join([random.choice(hexadecimal_alphabets) for _ in range(6)]) for _ in range(num_colors)]
-##############################MEMORY VS TIME PLOTTING END#######################################################
 
 
    
