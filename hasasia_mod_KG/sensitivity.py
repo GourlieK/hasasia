@@ -302,7 +302,6 @@ class Pulsar(object):
     def G(self):
         """Inverse Noise Weighted Transmission Function."""
         if not hasattr(self, '_G'):
-     
             self._G = G_matrix(designmatrix=self.designmatrix)
         return self._G
     
@@ -318,7 +317,7 @@ class Pulsar(object):
         Note that the computation of K_inv will remove the white noise covariance matrix.
         This will have the computation of the Transmission function, get_TfN not possible.
         """
-        L = jnp.linalg.cholesky(self.N)        
+        L = jsc.linalg.cholesky(self.N)        
         A = jnp.matmul(L,self.G)
         del L
         K = jnp.matmul(A.T,A)
@@ -776,7 +775,6 @@ class Spectrum(object):
             NcalInv= np.linalg.inv(Ncal)
         else:
             NcalInv = self.K_inv 
-
         toas = self.toas
         freqs = self.freqs
         Gmatrix = self.G
