@@ -10,9 +10,9 @@ import matplotlib as mpl
 import healpy as hp
 import astropy.units as u
 import astropy.constants as c
-mpl.rcParams['figure.dpi'] = 300
-mpl.rcParams['figure.figsize'] = [5,3]
-mpl.rcParams['text.usetex'] = True
+#mpl.rcParams['figure.dpi'] = 300
+#mpl.rcParams['figure.figsize'] = [5,3]
+#mpl.rcParams['text.usetex'] = True
 from enterprise.pulsar import Pulsar as ePulsar
 from memory_profiler import profile
 
@@ -44,7 +44,7 @@ def log_memory_usage(file_path:str):
 import sensitivity as hsen
 import sim as hsim
 import skymap as hsky
-
+from sensitivity import get_NcalInv_mem, get_NcalInv_RFF_mem
 class PseudoPulsar:
     """Quick class to store data from HDF5 file in prep for hasasia pulsar creation"""
     def __init__(self, toas, toaerrs, phi, theta, pdist, N, Mmat=None):
@@ -318,6 +318,8 @@ def hsen_spectrum_creation(pseudo:PseudoSpectraPulsar)->hsen.Spectrum:
     Returns:
         hsen.Spectrum: spectrum object
     """
+    get_NcalInv_mem.write(f'PSR {pseudo.name}\n')
+    get_NcalInv_mem.flush()
     start_time = time.time()
     spec_psr = hsen.Spectrum(pseudo, freqs=freqs)
     spec_psr.name = pseudo.name
@@ -338,6 +340,8 @@ def hsen_spectrum_creation_rrf(pseudo:PseudoSpectraPulsar)-> hsen.RRF_Spectrum:
     Returns:
         hsen.RRF_Spectrum: spectrum object
     """
+    get_NcalInv_RFF_mem.write(f'PSR {pseudo.name}\n')
+    get_NcalInv_RFF_mem.flush()
     start_time = time.time()
     if pseudo.name in rn_psrs.keys():
         Amp, gam = rn_psrs[pseudo.name]
@@ -537,9 +541,8 @@ if __name__ == '__main__':
     ###################################################
     #max is 34 for 11yr dataset
     #max is 45 for 12yr dataset
-    kill_count =  45
-    #num_chains = 5
-    thin = 10
+    kill_count =  5
+    thin = 5
     #yr used for making WN correlation matrix, specifically when yr=15
     yr=12
     fyr = 1/(365.25*24*3600)
@@ -566,7 +569,7 @@ if __name__ == '__main__':
             Tspan = f['Tspan'][:][0]
             freqs = np.logspace(np.log10(1/(5*Tspan)),np.log10(2e-7),400)
             freqs_rn = np.linspace(1/Tspan, 30/Tspan, 30)
-            freqs_gwb = np.linspace(1/Tspan, 5/Tspan, 5)
+            freqs_gwb = np.linspace(1/Tspan, 14/Tspan, 14)
 
             #reading names encoded as bytes, and re-converting them to strings, and deleting byte names
             names = f['names'][:]
@@ -644,13 +647,15 @@ if __name__ == '__main__':
         stats.print_stats()
 
         #plotting sensitivity curves
-        plt.axvline(x=1/Tspan)
-        plt.axvline(x=30/Tspan)
+        plt.axvline(x=1/Tspan, label=r'$\frac{1}{\mathrm{Tspan}}$', c='lime')
+        plt.axvline(x=30/Tspan, label=r'$\frac{30}{\mathrm{Tspan}}$', c='pink')
+        plt.axvline(x=14/Tspan, label=r'$\frac{14}{\mathrm{Tspan}}$', c='purple')
         plt.loglog(sc_freqs,sc_hc, label='Norm Stoch', c='blue')
         plt.loglog(dsc_freqs,dsc_hc, label='Norm Det', c='red')
         plt.loglog(rrf_sc_freqs,rrf_sc_hc, label='RRF Stoch', c='cyan', linestyle='--')
         plt.loglog(rrf_dsc_freqs,rrf_dsc_hc, label='RRF Det', c='orange', linestyle='--')
         plt.ylabel('Characteristic Strain, $h_c$')
+        plt.xlabel('Frequency (Hz)')
         plt.title(f'NANOGrav {yr}-year Data Set Sensitivity Curve')
         plt.grid(which='both')
         plt.legend()
@@ -669,11 +674,10 @@ if __name__ == '__main__':
             line_sep = line.split(',')
             time_data.append(float(line_sep[0]))
             mem_data.append(float(line_sep[1]))
-
+    plt.style.use('dark_background')
     time_data = np.array(time_data)
     time_data = time_data-null_time
     mem_data = np.array(mem_data)
-    plt.style.use('dark_background')
     plt.title('Memory vs Time')
     plt.plot(time_data, mem_data, c='yellow')
     plt.xlabel('Time (s)')
@@ -685,7 +689,7 @@ if __name__ == '__main__':
 
     # Generate random colors
     hexadecimal_alphabets = '0123456789ABCDEF'
-    num_colors = len(names_list)
+    num_colors = len(names_list*2)
     color = ["#" + ''.join([random.choice(hexadecimal_alphabets) for _ in range(6)]) for _ in range(num_colors)]
     
     increms_psrs = []
@@ -711,7 +715,6 @@ if __name__ == '__main__':
         val_1_psr = float(increms_psrs[i][2])
         val_2_psr = float(increms_psrs[i][3])
         index_psr = np.where((time_data >= val_1_psr) & (time_data <= val_2_psr))
-        # Plot pulsar data
         line_psr, = plt.plot(time_data[index_psr], mem_data[index_psr], label=name_psr, color=color[i])
         if "RRF" in name_psr:
             rrf_handles_psr.append(line_psr)
@@ -723,8 +726,8 @@ if __name__ == '__main__':
     plt.xlabel('Time [s]')
     plt.ylabel('RAM Memory Usage [MB]')
     plt.grid()
-    plt.axhline(y=0, color='black')
-    plt.axvline(x=0, color='black')
+    plt.axhline(y=0, color='white')
+    plt.axvline(x=0, color='white')
     plt.xlim(time_data[0] - 1, time_data[-1] + 1)
 
     # Create legends
