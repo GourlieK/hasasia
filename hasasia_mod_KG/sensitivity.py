@@ -446,12 +446,17 @@ class RRF_Spectrum(object):
     def Cgw(self):
         """Gravitational Wave Red Noise Covariance Matrix
         """
-        nf_gw = self.freqs_gwb.size
         nf = self.freqs_rn.size
+        nf_gw = self.freqs_gwb.size
 
-        # Create a mask to create frequencies for gwb
-        mask = np.isin(self.freqs_rn, self.freqs_gwb)
-        mask= np.repeat(mask, 2)
+        mask = np.full(nf, False)
+        for i in range(nf):
+            for j in range(nf_gw):
+                if np.isclose(self.freqs_rn[i], self.freqs_gwb[j], rtol=1e-5, atol=0):
+                    mask[i] = True
+                    continue
+        #duplicates the mask for use of 2Nfreq formalism
+        mask_rp = np.repeat(mask, 2)
       
         gwb_power = red_noise_powerlaw(A=self.amp_gw, gamma=self.gamma_gw, freqs=self.freqs_gwb)
         C_gwbproto = np.zeros((2*nf_gw, 2*nf_gw))
@@ -460,9 +465,7 @@ class RRF_Spectrum(object):
         del gwb_power
 
         C_gwb = np.zeros((2*nf, 2*nf))
-
-        masked_indices = np.where(mask)[0]
-        C_gwb[np.ix_(masked_indices, masked_indices)] = C_gwbproto
+        C_gwb[np.ix_(mask_rp, mask_rp)] = C_gwbproto
         return C_gwb/get_Tspan([self])
     
 
