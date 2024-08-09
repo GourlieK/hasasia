@@ -499,30 +499,17 @@ class RRF_Spectrum(object):
             _type_: _description_
         """
         #Defining Ncal and NcalInv depending on existence of self.N or self.K_inv
-        T = self.toas.max()-self.toas.min()
-        phi = (self.Cgw + self.Cirn)
-        phi_inv = jnp.linalg.inv(phi)
-        del phi
-
-        Sigma = (phi_inv + jnp.matmul(self.Z, self.J)).T
-        SigmaInv = jnp.linalg.inv(Sigma)
-        del Sigma
-        
-        Gtilde = jnp.zeros((self.freqs.size,self.G.shape[1]),dtype='complex128')
-        Gtilde = jnp.dot(jnp.exp(1j*2*jnp.pi*self.freqs[:,jnp.newaxis]*self.toas),self.G)
-
-        NcalInv_ = self.K_inv - jnp.matmul(self.Z.T, jnp.matmul(SigmaInv, self.Z))#divide by 2 for some reason   
-
-        del SigmaInv
-        #divided by 4, not 2 for some reason, possibly some normalization stuff
-        TfN = jnp.matmul(jnp.conjugate(Gtilde),jnp.matmul(NcalInv_,Gtilde.T)) / 2
-
-        if return_Gtilde_Ncal:
-            return jnp.real(TfN), Gtilde, jnp.linalg.inv(NcalInv_)
-        elif full_matrix:
-            return jnp.real(TfN)
-        else:
-            return jnp.real(jnp.diag(TfN)) / T
+        if not hasattr(self, '_NcalInv'):
+            phi = jnp.array((self.Cgw + self.Cirn))
+            K_inv = jnp.array(self.K_inv)
+            G = jnp.array(self.G)
+            J = jnp.array(self.J)
+            Z = jnp.array(self.Z)
+            toas = jnp.array(self.toas)
+            freqs = jnp.array(self.freqs)
+            self._NcalInv = get_NcalInv_RRF(K_inv, G, phi, J,
+                    Z, freqs, toas, full_matrix=full_matrix, return_Gtilde_Ncal=return_Gtilde_Ncal)
+        return self._NcalInv
             
     @property
     def P_n(self):
