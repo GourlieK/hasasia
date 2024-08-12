@@ -522,7 +522,7 @@ if __name__ == '__main__':
     #max is 45 for 12yr dataset
     kill_count = 45
     num_chains = 50
-    thin = 5
+    thin = 20
     A_gw = 1.73e-15
     gam_gw = 13/3
 
@@ -627,6 +627,7 @@ if __name__ == '__main__':
     plt.legend()
     plt.savefig(path+'/sc_h_c_sigma.png', dpi=1000)
     plt.show()
+    plt.close()
 
     plt.title(f'NANOGrav {yr}-year Data Set Sensitivity Curve')
     for i in range(num_chains):
@@ -644,6 +645,7 @@ if __name__ == '__main__':
     #plt.legend()
     plt.savefig(path+'/sc_h_c_total.png', dpi=1000)
     plt.show()
+    plt.close()
 
     
     
@@ -665,6 +667,7 @@ if __name__ == '__main__':
     plt.tight_layout()
     plt.savefig(path+'/Batch_time_psrs.png', dpi=1000)
     plt.show()
+    plt.close()
 
 
 ##############################MEMORY VS TIME PLOTTING START#################################################
@@ -687,11 +690,7 @@ if __name__ == '__main__':
     plt.ylabel('Virtual Memory (GB)')
     plt.savefig(path+'/mem_time.png', dpi=1000)
     plt.show()
-
-
-    hexadecimal_alphabets = '0123456789ABCDEF'
-    num_colors = len(names_list)
-    color = ["#" + ''.join([random.choice(hexadecimal_alphabets) for _ in range(6)]) for _ in range(num_colors)]
+    plt.close()
 ##############################MEMORY VS TIME PLOTTING END#######################################################
 
 
