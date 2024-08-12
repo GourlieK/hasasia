@@ -675,10 +675,7 @@ if __name__ == '__main__':
     plt.loglog(freqs, h_sc_med, label='Median Stoch', lw=1, c='black')
     plt.loglog(freqs, h_dsc_med, label='Median Det', lw=1, c='red')
     plt.loglog(freqs, rrf_sc_maxpost_h_c, label='Max lnPost Stoch', lw=1, c='blue', linestyle='dotted')
-    plt.loglog(freqs, rrf_dsc_maxpost_h_c, label='Max lnPost Det', lw=1, c='black', linestyle='dotted')
-
-    #rrf_sc_maxpost_h_c, rrf_dsc_maxpost_h_c
-    
+    plt.loglog(freqs, rrf_dsc_maxpost_h_c, label='Max lnPost Det', lw=1, c='black', linestyle='dotted')    
 
     plt.fill_between(freqs, h_sc_sigma_low, h_sc_sigma_high, color='gray', label='1$\sigma$ Stoch')
     plt.fill_between(freqs, h_dsc_sigma_low, h_dsc_sigma_high, color='orange', label='1$\sigma$ Det')
@@ -695,6 +692,7 @@ if __name__ == '__main__':
     plt.legend()
     plt.savefig(path+'/sc_h_c_sigma.png', dpi=1000)
     plt.show()
+    plt.close()
 
     plt.title(f'NANOGrav {yr}-year Data Set Sensitivity Curve')
     for i in range(num_chains):
@@ -714,6 +712,7 @@ if __name__ == '__main__':
     plt.legend()
     plt.savefig(path+'/sc_h_c_total.png', dpi=1000)
     plt.show()
+    plt.close()
 
     
     
@@ -735,6 +734,7 @@ if __name__ == '__main__':
     plt.tight_layout()
     plt.savefig(path+'/Batch_time_psrs.png', dpi=1000)
     plt.show()
+    plt.close()
 
 
 ##############################MEMORY VS TIME PLOTTING START#################################################
@@ -757,6 +757,7 @@ if __name__ == '__main__':
     plt.ylabel('Virtual Memory (GB)')
     plt.savefig(path+'/mem_time.png', dpi=1000)
     plt.show()
+    plt.close()
 
 
 
