@@ -661,6 +661,7 @@ if __name__ == '__main__':
         plt.legend()
         plt.savefig(path+'/sc_h_c.png', bbox_inches ="tight", dpi=1000)
         plt.show()
+        plt.close()
 ##############################SENSITIVITY CURVE PLOT END####################################################
 
 
@@ -684,6 +685,7 @@ if __name__ == '__main__':
     plt.ylabel('Virtual Memory (GB)')
     plt.savefig(path+'/mem_time.png')
     plt.show()
+    plt.close()
 
 
 
@@ -741,6 +743,7 @@ if __name__ == '__main__':
     # Save and show the plot
     plt.savefig(path+'/colored_mem_time_psrs.png')
     plt.show()
+    plt.close()
 
     for i in range(len(increms_specs)): 
         name_psr = increms_specs[i][0] + increms_specs[i][1]
@@ -817,6 +820,7 @@ if __name__ == '__main__':
         plt.tight_layout()
         plt.savefig(path+'/time_bar_psrs.png') 
         plt.show()
+        plt.close()
 ##############################BAR CHARTS FOR TOTAL TIME OF COMPUTATION PER PULSAR END###########################
 
 
@@ -852,8 +856,12 @@ if __name__ == '__main__':
         plt.tight_layout()
         plt.savefig(path+'/time_bar_specs.png') 
         plt.show()
-##############################BAR CHART FOR TOTAL TIME OF COMPUTATION PER SPECTRA END###########################
+        plt.close()
 
+        with open(path+'/spectra_total_time.txt', 'w') as file:
+            file.write(f'Total OG Spec: {sum(ogs_plot_values_specs)}\n')
+            file.write(f'Total RRF Spec: {sum(ogs_plot_values_specs)}\n')
+##############################BAR CHART FOR TOTAL TIME OF COMPUTATION PER SPECTRA END###########################
 
 
 ##############################BAR CHART FOR TOTAL TIME OF COMPUTATION PER PULSAR+SPECTRA START###################
@@ -884,6 +892,7 @@ if __name__ == '__main__':
     plt.tight_layout()
     plt.savefig(path+'/time_bar_total.png') 
     plt.show()
+    plt.close()
 ##############################BAR CHART FOR TOTAL TIME OF COMPUTATION PER PULSAR+SPECTRA END#####################
 
        
