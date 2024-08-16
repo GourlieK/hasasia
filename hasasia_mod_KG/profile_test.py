@@ -642,11 +642,11 @@ if __name__ == '__main__':
     #max is 45 for 12yr dataset
     #max is 67 for 15yr dataset
     kill_count =  67
-    thin = 10
+    thin = 5
     num_irn_harmonics = 30
     num_gwb_harmonics = 15
     #yr used for making WN correlation matrix, specifically when yr=15
-    yr=11
+    yr=15
     fyr = 1/(365.25*24*3600)
     #GWB parameters
     A_gw = 1.73e-15
@@ -755,8 +755,8 @@ if __name__ == '__main__':
 
         #plotting sensitivity curves
         plt.axvline(x=1/Tspan, label=r'$\frac{1}{\mathrm{Tspan}}$', c='lime')
-        plt.axvline(x=30/Tspan, label=r'$\frac{30}{\mathrm{Tspan}}$', c='pink')
-        plt.axvline(x=14/Tspan, label=r'$\frac{14}{\mathrm{Tspan}}$', c='purple')
+        plt.axvline(x=num_gwb_harmonics/Tspan, label=fr'$\frac{{{num_gwb_harmonics}}}{{\mathrm{{Tspan}}}}$', c='purple')
+        plt.axvline(x=num_irn_harmonics/Tspan, label=fr'$\frac{{{num_irn_harmonics}}}{{\mathrm{{Tspan}}}}$', c='teal')
         plt.loglog(sc_freqs,sc_hc, label='Norm Stoch', c='blue')
         plt.loglog(dsc_freqs,dsc_hc, label='Norm Det', c='red')
         plt.loglog(rrf_sc_freqs,rrf_sc_hc, label='RRF Stoch', c='cyan', linestyle='--')
