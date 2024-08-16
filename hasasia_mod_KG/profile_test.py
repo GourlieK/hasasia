@@ -104,6 +104,7 @@ def make_corr(psr: ePulsar, noise:dict, yr:float)->np.array:
         np.array: white noise correlation matrix
     """
     N = psr.toaerrs.size
+    print(psr.name)
     corr = np.zeros((N,N))
     _, _, fl, _, bi = hsen.quantize_fast(psr.toas,psr.toaerrs,
                                          flags=psr.flags['f'],dt=1)
@@ -115,6 +116,7 @@ def make_corr(psr: ePulsar, noise:dict, yr:float)->np.array:
         mask = np.where(psr.flags['f']==be)
         key_ef = '{0}_{1}_{2}'.format(psr.name,be,'efac')
         if yr == 15:
+            print('yay')
             key_eq = '{0}_{1}_log10_{2}'.format(psr.name,be,'t2equad')
             sigma_sqr[mask] = (noise[key_ef]**2 * ((psr.toaerrs[mask]**2) ## t2equad -- new/correct for 15yr
                            + (10**noise[key_eq])**2))
@@ -147,7 +149,10 @@ def enterprise_creation(pars:list, tims:list, ephem:str)->list:
     count = 1
     for par,tim in zip(pars,tims):
         if count <= kill_count:
-            ePsr = ePulsar(par, tim,  ephem=ephem)
+            if ephem=='DE440':
+                ePsr = ePulsar(par, tim,  ephem=ephem, timing_package='pint')
+            else:
+                ePsr = ePulsar(par, tim,  ephem=ephem)
             enterprise_Psrs.append(ePsr)
             print('\rPSR {0} complete'.format(ePsr.name),end='',flush=True)
             print(f'\n{count} pulsars created')
@@ -346,11 +351,11 @@ def hsen_spectrum_creation_rrf(pseudo:PseudoSpectraPulsar)-> hsen.RRF_Spectrum:
     if pseudo.name in rn_psrs.keys():
         Amp, gam = rn_psrs[pseudo.name]
         #creates spectrum pulsar based on both instrinsic red noise and gravitational wave background
-        spec_psr = hsen.RRF_Spectrum(psr=pseudo, freqs_gw=freqs_gwb,amp_gw=A_gw, gamma_gw=gam_gw,
+        spec_psr = hsen.RRF_Spectrum(psr=pseudo, Tspan=Tspan, freqs_gw=freqs_gwb,amp_gw=A_gw, gamma_gw=gam_gw,
                                      freqs_rn=freqs_rn, amp = Amp, gamma = gam, freqs=freqs)
     else:
         #creates spectrum pulsar just based on gravitational wave background
-        spec_psr = hsen.RRF_Spectrum(psr=pseudo, freqs_gw=freqs_gwb,amp_gw=A_gw, gamma_gw=gam_gw,
+        spec_psr = hsen.RRF_Spectrum(psr=pseudo, Tspan=Tspan, freqs_gw=freqs_gwb,amp_gw=A_gw, gamma_gw=gam_gw,
                                      freqs_rn=freqs_rn, freqs=freqs)
         
     spec_psr.name = pseudo.name
@@ -506,7 +511,7 @@ def yr_15_data():
     data_dir = r'/home/gourliek/Nanograv/NANOGrav15yr_PulsarTiming_v2.0.0/minish/jpg00017/NANOGrav15yr_PulsarTiming_v2.0.0/narrowband/'
     par_dir = data_dir + r'par/'
     tim_dir = data_dir + r'tim/'
-    noise_dir = data_dir+r'noise/'
+    noise_file = data_dir+r'15yr_wn_dict.json'
     jeremy_psrs =["B1855+09","B1937+21","B1953+29","J0023+0923","J0030+0451","J0340+4130","J0406+3039","J0437-4715","J0509+0856",
                         "J0557+1551","J0605+3757","J0610-2100","J0613-0200","J0636+5128","J0645+5158","J0709+0458","J0740+6620",
                         "J0931-1902","J1012+5307","J1012-4235","J1022+1001","J1024-0719","J1125+7819","J1312+0051","J1453+1902",
@@ -520,9 +525,7 @@ def yr_15_data():
     #sorting parameter and timing files
     parfiles = sorted(glob.glob(par_dir+'*.par'))
     timfiles = sorted(glob.glob(tim_dir+'*.tim'))
-    noise_chains = sorted(glob.glob(noise_dir+'*.nb.chain_1.txt'))
-    noise_params = sorted(glob.glob(noise_dir+'*.pars.txt'))
-
+   
     filter_parfiles = []
     for file in parfiles:
         if 'ao' in file:
@@ -541,10 +544,6 @@ def yr_15_data():
     
     del parfiles, timfiles
 
-
-    #noise_file = data_dir + r'channelized_12p5yr_v3_full_noisedict.json' 
-
-     #getting names of pulsars from timing files
     par_psr_names = []
     for file in filter_parfiles:
         par_psr_names.append(get_psrname(file))
@@ -575,52 +574,9 @@ def yr_15_data():
     if len(pars) != 67 or len(tims) !=67:
         exit()
 
-    noise_params_filter = []
-    for pn in noise_params:
-        name_kindof = get_psrname(pn)
-        name_period_split = name_kindof.split('.')
-        name = name_period_split[0]
-        if name == exclude_psr:
-            continue
-        if 'ao' in name:
-            continue
-        elif 'gbt' in name:
-            continue
-        noise_params_filter.append(pn)
-    
-    noise_chains_filter = []
-    for pn in noise_chains:
-        name_kindof = get_psrname(pn)
-        name_period_split = name_kindof.split('.')
-        name = name_period_split[0]
-        if name == exclude_psr:
-            continue
-        if 'ao' in name:
-            continue
-        elif 'gbt' in name:
-            continue
-        noise_chains_filter.append(pn)
-
-    del noise_chains, noise_params
-
-    if len(noise_chains_filter) != 67 or len(noise_params_filter) !=67:
-        exit()
-
-    
     noise = {}
-    for i in range(67):
-        with open(noise_chains_filter[i], 'r') as noise_chnfile:
-            #finding the index for the highest ln_post value
-            chain_matrix = np.loadtxt(noise_chnfile)
-            ln_post_max = np.argmax(chain_matrix[-4,:])
-            
-        with open(noise_params_filter[i], 'r') as noise_parfile:
-            for ele in enumerate(noise_parfile):
-                line = ele[1]
-                line = line.strip('\n')
-                ind = ele[0]
-                noise[line] = chain_matrix[ln_post_max, ind]
-
+    with open(noise_file, 'r') as fp:
+        noise.update(json.load(fp))        
     
     rn_psrs = {}
     for name in psr_list:
@@ -687,10 +643,12 @@ if __name__ == '__main__':
     #max is 34 for 11yr dataset
     #max is 45 for 12yr dataset
     #max is 67 for 15yr dataset
-    kill_count =  34
+    kill_count =  67
     thin = 10
+    num_irn_harmonics = 30
+    num_gwb_harmonics = 15
     #yr used for making WN correlation matrix, specifically when yr=15
-    yr=12
+    yr=11
     fyr = 1/(365.25*24*3600)
     #GWB parameters
     A_gw = 1.73e-15
@@ -700,9 +658,9 @@ if __name__ == '__main__':
     names_list = []
     with cProfile.Profile() as pr:
         #Realistic PTA datasets
-        pars, tims, noise, rn_psrs, edir, ephem = yr_11_data()
+        #pars, tims, noise, rn_psrs, edir, ephem = yr_11_data()
         #pars, tims, noise, rn_psrs, edir, ephem = yr_12_data()
-        #pars, tims, noise, rn_psrs, edir, ephem = yr_15_data()
+        pars, tims, noise, rn_psrs, edir, ephem = yr_15_data()
         
         #enterprise pulsars creation, disk write, and deletion
         if not os.path.isfile(edir):
@@ -715,10 +673,12 @@ if __name__ == '__main__':
             #reading Tspan and creation of frequencies to observe
             Tspan = f['Tspan'][:][0]
             freqs = np.logspace(np.log10(1/(5*Tspan)),np.log10(2e-7),400)
-            freqs_rn = freqs
-            freqs_gwb = freqs
-            #freqs_rn = np.linspace(1/Tspan, 30/Tspan, 30)
-            #freqs_gwb = np.linspace(1/Tspan, 14/Tspan, 14)
+            #freqs=np.linspace(1/Tspan, 400/Tspan, 400)
+            #issue using logspace instead of harmonics of 1/Tspan
+            #freqs_rn = freqs
+            #freqs_gwb = freqs
+            freqs_rn = np.linspace(1/Tspan, num_irn_harmonics/Tspan, num_irn_harmonics)
+            freqs_gwb = np.linspace(1/Tspan, num_gwb_harmonics/Tspan, num_gwb_harmonics)
 
             #reading names encoded as bytes, and re-converting them to strings, and deleting byte names
             names = f['names'][:]
