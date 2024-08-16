@@ -224,6 +224,8 @@ def get_NcalInv_RRF(K_inv: jax.Array, G: jax.Array, phi:jax.Array, J: jax.Array,
                     Z: jax.Array, freqs: jax.Array, toas:jax.Array, full_matrix=False, return_Gtilde_Ncal=False):
     T = toas.max()-toas.min()
     phi_inv = jnp.linalg.inv(phi)
+    del phi
+
     Sigma = (phi_inv + jnp.matmul(Z, J)).T
     SigmaInv = jnp.linalg.inv(Sigma)
     del Sigma

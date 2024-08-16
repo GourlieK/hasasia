@@ -104,7 +104,6 @@ def make_corr(psr: ePulsar, noise:dict, yr:float)->np.array:
         np.array: white noise correlation matrix
     """
     N = psr.toaerrs.size
-    print(psr.name)
     corr = np.zeros((N,N))
     _, _, fl, _, bi = hsen.quantize_fast(psr.toas,psr.toaerrs,
                                          flags=psr.flags['f'],dt=1)
@@ -116,7 +115,6 @@ def make_corr(psr: ePulsar, noise:dict, yr:float)->np.array:
         mask = np.where(psr.flags['f']==be)
         key_ef = '{0}_{1}_{2}'.format(psr.name,be,'efac')
         if yr == 15:
-            print('yay')
             key_eq = '{0}_{1}_log10_{2}'.format(psr.name,be,'t2equad')
             sigma_sqr[mask] = (noise[key_ef]**2 * ((psr.toaerrs[mask]**2) ## t2equad -- new/correct for 15yr
                            + (10**noise[key_eq])**2))
