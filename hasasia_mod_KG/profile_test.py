@@ -702,8 +702,8 @@ if __name__ == '__main__':
     #max is 45 for 12.5yr dataset
     #max is 67 for 15yr dataset
     kill_count = 67
-    num_chains = 50
-    thin = 10
+    num_chains = 1000
+    thin = 2
     gwb_harms = 15
     irn_harms = 30
     #yr used for making WN correlation matrix, specifically when yr=15
@@ -731,7 +731,7 @@ if __name__ == '__main__':
 
         pkl_psrs = pickle_enterprise(pickle_dir)
         if not os.path.isfile(edir):
-            enterprise_hdf5(ePsrs, noise, yr, edir, thin)
+            enterprise_hdf5(pkl_psrs, noise, yr, edir, thin)
             del pkl_psrs
 
         #reading hdf5 file containing enterprise.pulsar attributes
@@ -881,7 +881,3 @@ if __name__ == '__main__':
     plt.savefig(path+'/mem_time.png', dpi=1000)
     plt.show()
     plt.close()
-
-
-
-   
