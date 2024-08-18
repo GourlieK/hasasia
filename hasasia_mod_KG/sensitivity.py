@@ -433,7 +433,7 @@ class RRF_Spectrum(object):
         nf =  self.freqs_rn.size
         #For pulsars with no intrinsic red noise, then have an extremely small amplitude psd value
         if self.gamma == None or self.amp == None:
-            C_rn_proto = red_noise_powerlaw(A=1e-50, gamma=1, freqs=self.freqs_rn)
+            C_rn_proto = red_noise_powerlaw(A=1e-40, gamma=0, freqs=self.freqs_rn)
             C_rn = np.zeros((2*nf, 2*nf))
             C_rn[::2, ::2] = np.diag(C_rn_proto)   #odd elements
             C_rn[1::2, 1::2] = np.diag(C_rn_proto) #even elements
