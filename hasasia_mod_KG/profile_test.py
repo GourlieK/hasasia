@@ -1,7 +1,7 @@
 #Kyle Gourlie
 #7/23/2024
 #library imports
-import os, shutil, psutil, time, threading, random, h5py, gc, glob, json, cProfile, pstats
+import os, shutil, psutil, time, threading, random, h5py, pickle, glob, json, cProfile, pstats
 import numpy as np
 import dask.array as da
 import scipy.linalg as sl
@@ -159,28 +159,46 @@ def enterprise_creation(pars:list, tims:list, ephem:str)->list:
             break
     return enterprise_Psrs
 
-def enterprise_hdf5(ePsrs:list, noise:dict, yr:float, edir:str, thin):
+def enterprise_pickle(ePsrs:list, pickle_dir):
+    with open(pickle_dir, 'wb') as f:
+        pickle.dump(ePsrs, f)
+
+def pickle_enterprise(pickle_dir):
+    with open(pickle_dir, 'rb') as f:
+        ePsrs = pickle.load(f)
+        return ePsrs
+
+def enterprise_hdf5(ePsrs:list, noise:dict, yr:float, edir:str):
     """Writes enterprise.pulsar objects onto HDF5 file with WN Covariance matrix attributes.
 
     - ePsrs (list): List of enterprise.pulsar objects
     - edir: Directory in which to store HDF5 file under
     """
+    thin_file = open(path+'/thin_vals.txt', 'w')
     Tspan = hsen.get_Tspan(ePsrs)
     with h5py.File(edir, 'w') as f:
         Tspan_h5 = f.create_dataset('Tspan', (1,), float)
         Tspan_h5[:] = Tspan
         #numpy array stored with placeholders so names can be indexed into it later, also storing strings as bytes
-        name_list = np.array(['X' for _ in range(kill_count)], dtype=h5py.string_dtype(encoding='utf-8'))
+        name_list = np.array(['X' for _ in range(len(ePsrs))], dtype=h5py.string_dtype(encoding='utf-8'))
         #pseudo while/for-loop designed to delete first entry
         i = 0
         while True:
-            ePsrs[0].N = make_corr(ePsrs[0], noise, yr)[::thin, ::thin]
+            print(f'{ePsrs[0].name}\t{ePsrs[0].toas.size}\n')
+            if ePsrs[0].toas.size > 2e4:
+                ePsrs[0].thin = 5
+            else:
+                ePsrs[0].thin = 1
+            thin_file.write(f'{ePsrs[0].name}\t{ePsrs[0].thin}\n')
+            thin_file.flush()
+
+            ePsrs[0].N = make_corr(ePsrs[0], noise, yr)[::ePsrs[0].thin, ::ePsrs[0].thin]
             hdf5_psr = f.create_group(ePsrs[0].name)
-            hdf5_psr.create_dataset('toas', ePsrs[0].toas.shape, ePsrs[0].toas.dtype, data=ePsrs[0].toas)
-            hdf5_psr.create_dataset('toaerrs', ePsrs[0].toaerrs.shape,ePsrs[0].toaerrs.dtype, data=ePsrs[0].toaerrs)
+            hdf5_psr.create_dataset('toas', ePsrs[0].toas[::ePsrs[0].thin].shape, ePsrs[0].toas[::ePsrs[0].thin].dtype, data=ePsrs[0].toas[::ePsrs[0].thin])
+            hdf5_psr.create_dataset('toaerrs', ePsrs[0].toaerrs[::ePsrs[0].thin].shape,ePsrs[0].toaerrs[::ePsrs[0].thin].dtype, data=ePsrs[0].toaerrs[::ePsrs[0].thin])
             hdf5_psr.create_dataset('phi', (1,), float, data=ePsrs[0].phi)
             hdf5_psr.create_dataset('theta', (1,), float, data=ePsrs[0].theta)
-            hdf5_psr.create_dataset('designmatrix', ePsrs[0].Mmat.shape, ePsrs[0].Mmat.dtype, data=ePsrs[0].Mmat)
+            hdf5_psr.create_dataset('designmatrix', ePsrs[0].Mmat[::ePsrs[0].thin,:].shape, ePsrs[0].Mmat[::ePsrs[0].thin,:].dtype, data=ePsrs[0].Mmat[::ePsrs[0].thin,:])
             hdf5_psr.create_dataset('N', ePsrs[0].N.shape, ePsrs[0].N.dtype, data=ePsrs[0].N)
             hdf5_psr.create_dataset('pdist', (2,), float, data=ePsrs[0].pdist)
             name_list[i] = ePsrs[0].name
@@ -193,6 +211,7 @@ def enterprise_hdf5(ePsrs:list, noise:dict, yr:float, edir:str, thin):
             
         f.create_dataset('names',data = name_list)
         f.flush()
+        thin_file.close()
         print('enterprise.pulsars successfully saved to HDF5\n')
 
 
@@ -225,19 +244,19 @@ def hsen_pulsar_creation(pseudo:PseudoPulsar, hsen_dir:str):
     #adding red noise covariance matrix responsible for the gravitational wave background based on the selected frequencies
     gwb = hsen.red_noise_powerlaw(A=A_gw, gamma=gam_gw, freqs=freqs_gwb)
     pseudo.N += hsen.corr_from_psd(freqs=freqs_gwb, psd=gwb,
-                                toas=pseudo.toas[::thin])
+                                toas=pseudo.toas)
 
     #if instrisic red noise parameters for individual pulsars exist, then add red noise covarariance matrix to it
     if pseudo.name in rn_psrs.keys():
         Amp, gam = rn_psrs[pseudo.name]
         plaw = hsen.red_noise_powerlaw(A=Amp, gamma=gam, freqs=freqs_rn)  #was +=
         pseudo.N += hsen.corr_from_psd(freqs=freqs_rn, psd=plaw,
-                                toas=pseudo.toas[::thin])   
+                                toas=pseudo.toas)   
     #creating hasasia pulsar tobject 
-    psr = hsen.Pulsar(toas=pseudo.toas[::thin],
-                        toaerrs=pseudo.toaerrs[::thin],
+    psr = hsen.Pulsar(toas=pseudo.toas,
+                        toaerrs=pseudo.toaerrs,
                         phi=pseudo.phi,theta=pseudo.theta, 
-                        N=pseudo.N, designmatrix=pseudo.Mmat[::thin,:], pdist=pseudo.pdist)
+                        N=pseudo.N, designmatrix=pseudo.Mmat, pdist=pseudo.pdist)
     #setting name of hasasia pulsar
     psr.name = pseudo.name
     #calling (GCG^T)^-1 to be computed 
@@ -256,10 +275,10 @@ def hsen_pulsar_rrf_creation(pseudo: PseudoPulsar, hsen_dir_rrf:str):
         hsen_dir_rrf (str): directory for storing hasasia pulsar object
     """
     start_time = time.time()
-    psr = hsen.Pulsar(toas=pseudo.toas[::thin],
-                                    toaerrs=pseudo.toaerrs[::thin],
+    psr = hsen.Pulsar(toas=pseudo.toas,
+                                    toaerrs=pseudo.toaerrs,
                                     phi=pseudo.phi,theta=pseudo.theta, 
-                                    N=pseudo.N, designmatrix=pseudo.Mmat[::thin,:], pdist=pseudo.pdist)
+                                    N=pseudo.N, designmatrix=pseudo.Mmat, pdist=pseudo.pdist)
     psr.name = pseudo.name
     _ = psr.K_inv
     end_time = time.time()
@@ -328,6 +347,7 @@ def hsen_spectrum_creation(pseudo:PseudoSpectraPulsar)->hsen.Spectrum:
     spec_psr.name = pseudo.name
     #Calling computation of NcalInv, due to its high computational cost
     _ = spec_psr.NcalInv
+    print(f'{spec_psr.name} NcalInv Computed\n')
     end_time = time.time()
     time_inc_specs.write(f"OG {name} {start_time-null_time} {end_time-null_time}\n")
     time_inc_specs.flush()
@@ -359,6 +379,7 @@ def hsen_spectrum_creation_rrf(pseudo:PseudoSpectraPulsar)-> hsen.RRF_Spectrum:
     spec_psr.name = pseudo.name
 
     _ = spec_psr.NcalInv
+    print(f'RRF {spec_psr.name} NcalInv Computed\n')
     end_time = time.time()
     time_inc_specs.write(f"RRF {name} {start_time-null_time} {end_time-null_time}\n")
     time_inc_specs.flush()
@@ -427,7 +448,7 @@ def yr_11_data():
            'J2145-0750':[10**-12.6893, 1.32307],
            }
 
-    edir = '/home/gourliek/11_yr_enterprise_pulsars.hdf5'
+    edir = data_path+'/11_yr_enterprise_pulsars.hdf5'
     ephem = 'DE436'
     return pars, tims, noise, rn_psrs, edir, ephem
 
@@ -498,7 +519,7 @@ def yr_12_data():
             elif key == gamma_key:
                 rn_psrs[name][1] = noise[gamma_key]
 
-    edir = '/home/gourliek/12_yr_enterprise_pulsars.hdf5'
+    edir = data_path+'/12_yr_enterprise_pulsars.hdf5'
     ephem = 'DE438'
     
     return pars, tims, noise, rn_psrs, edir, ephem
@@ -594,7 +615,7 @@ def yr_15_data():
             elif key == gamma_key:
                 rn_psrs[name][1] = noise[gamma_key]
 
-    edir = '/home/gourliek/15_yr_enterprise_pulsars.hdf5'
+    edir = data_path+'/15_yr_enterprise_pulsars.hdf5'
     ephem = 'DE440'
 
     return pars, tims, noise, rn_psrs, edir, ephem
@@ -630,6 +651,12 @@ def chains_puller(num: int):
 
 
 if __name__ == '__main__':
+    data_path = os.path.expanduser('~/psr_data')
+    try:
+        os.mkdir(data_path)
+    except FileExistsError:
+        print('Pulsar data folder exists.\nLoading data...')
+    
     null_time = time.time()
     log_path = path+'/time_mem_data.txt'
     #this will allow memory profile data to run in parallel with the rest of the program
@@ -641,12 +668,10 @@ if __name__ == '__main__':
     #max is 34 for 11yr dataset
     #max is 45 for 12yr dataset
     #max is 67 for 15yr dataset
-    kill_count =  67
-    thin = 5
-    num_irn_harmonics = 30
-    num_gwb_harmonics = 15
+    kill_count =  34
+    irn_harms = 30
+    gwb_harms = 15
     #yr used for making WN correlation matrix, specifically when yr=15
-    yr=15
     fyr = 1/(365.25*24*3600)
     #GWB parameters
     A_gw = 1.73e-15
@@ -656,15 +681,27 @@ if __name__ == '__main__':
     names_list = []
     with cProfile.Profile() as pr:
         #Realistic PTA datasets
-        #pars, tims, noise, rn_psrs, edir, ephem = yr_11_data()
+        pars, tims, noise, rn_psrs, edir, ephem = yr_11_data()
         #pars, tims, noise, rn_psrs, edir, ephem = yr_12_data()
-        pars, tims, noise, rn_psrs, edir, ephem = yr_15_data()
+        #pars, tims, noise, rn_psrs, edir, ephem = yr_15_data()
         
-        #enterprise pulsars creation, disk write, and deletion
-        if not os.path.isfile(edir):
+        if ephem == 'DE436':
+            yr = 11
+        elif ephem == 'DE4380':
+            yr=12.5
+        elif ephem == 'DE440':
+            yr = 15
+
+        pickle_dir = os.path.expanduser(data_path+f'/{yr}_enterprise_pulsars.pkl')
+        if not os.path.isfile(pickle_dir):
             ePsrs = enterprise_creation(pars, tims, ephem)
-            enterprise_hdf5(ePsrs, noise, yr, edir, thin)
+            enterprise_pickle(ePsrs, pickle_dir)
             del ePsrs
+
+        pkl_psrs = pickle_enterprise(pickle_dir)
+        if not os.path.isfile(edir):
+            enterprise_hdf5(pkl_psrs, noise, yr, edir)
+        del pkl_psrs
 
         #reading hdf5 file containing enterprise.pulsar attributes
         with h5py.File(edir, 'r') as f:
@@ -675,23 +712,23 @@ if __name__ == '__main__':
             #issue using logspace instead of harmonics of 1/Tspan
             #freqs_rn = freqs
             #freqs_gwb = freqs
-            freqs_rn = np.linspace(1/Tspan, num_irn_harmonics/Tspan, num_irn_harmonics)
-            freqs_gwb = np.linspace(1/Tspan, num_gwb_harmonics/Tspan, num_gwb_harmonics)
+            freqs_rn = np.linspace(1/Tspan, irn_harms/Tspan, irn_harms)
+            freqs_gwb = np.linspace(1/Tspan, gwb_harms/Tspan, gwb_harms)
 
             #reading names encoded as bytes, and re-converting them to strings, and deleting byte names
             names = f['names'][:]
-            for i in range(kill_count):
+            for i in range(len(names)):
                 names_list.append(names[i].decode('utf-8'))
             del names
 
             #Original Method for creation of hasasia pulsars, and saving them to hdf5 file
-            hsen_dir = os.path.expanduser('~/hsen_psrs.hdf5')
+            hsen_dir = os.path.expanduser(f'{data_path}/hsen_psrs.hdf5')
             if not os.path.isfile(hsen_dir):
                 hsen_pulsr_hdf5_entire(f, names_list, hsen_dir)
                 
                 
             #Rank-Reduced Method for creation of hasasia pulsars, and saving them to hdf5 file
-            hsen_dir_rrf = os.path.expanduser('~/hsen_psrs_rrf.hdf5')
+            hsen_dir_rrf = os.path.expanduser(f'{data_path}/hsen_psrs_rrf.hdf5')
             if not os.path.isfile(hsen_dir_rrf):
                 hsen_rrf_pulsar_hdf5_entire(f, names_list, hsen_dir_rrf)
                 
@@ -754,17 +791,18 @@ if __name__ == '__main__':
         stats.print_stats()
 
         #plotting sensitivity curves
-        plt.axvline(x=1/Tspan, label=r'$\frac{1}{\mathrm{Tspan}}$', c='lime')
-        plt.axvline(x=num_gwb_harmonics/Tspan, label=fr'$\frac{{{num_gwb_harmonics}}}{{\mathrm{{Tspan}}}}$', c='purple')
-        plt.axvline(x=num_irn_harmonics/Tspan, label=fr'$\frac{{{num_irn_harmonics}}}{{\mathrm{{Tspan}}}}$', c='teal')
+        plt.style.use('dark_background')
+        plt.axvline(x=1/Tspan, label=r'$\frac{1}{\mathrm{Tspan}}$', c='lime', linestyle='--')
+        plt.axvline(x=gwb_harms/Tspan, label=fr'$\frac{{{gwb_harms}}}{{\mathrm{{Tspan}}}}$', c='yellow', linestyle='--')
+        plt.axvline(x=irn_harms/Tspan, label=fr'$\frac{{{irn_harms}}}{{\mathrm{{Tspan}}}}$', c='pink', linestyle='--')
         plt.loglog(sc_freqs,sc_hc, label='Norm Stoch', c='blue')
         plt.loglog(dsc_freqs,dsc_hc, label='Norm Det', c='red')
-        plt.loglog(rrf_sc_freqs,rrf_sc_hc, label='RRF Stoch', c='cyan', linestyle='--')
-        plt.loglog(rrf_dsc_freqs,rrf_dsc_hc, label='RRF Det', c='orange', linestyle='--')
+        plt.loglog(rrf_sc_freqs,rrf_sc_hc, label='RRF Stoch', c='cyan', linestyle='dotted')
+        plt.loglog(rrf_dsc_freqs,rrf_dsc_hc, label='RRF Det', c='orange', linestyle='dotted')
         plt.ylabel('Characteristic Strain, $h_c$')
         plt.xlabel('Frequency (Hz)')
         plt.title(f'NANOGrav {yr}-year Data Set Sensitivity Curve')
-        plt.grid(which='both')
+        plt.grid(which='both', color='gray')
         plt.legend()
         plt.savefig(path+'/sc_h_c.png', bbox_inches ="tight", dpi=1000)
         plt.show()
