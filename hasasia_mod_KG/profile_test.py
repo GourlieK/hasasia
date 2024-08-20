@@ -687,7 +687,7 @@ if __name__ == '__main__':
         
         if ephem == 'DE436':
             yr = 11
-        elif ephem == 'DE4380':
+        elif ephem == 'DE438':
             yr=12.5
         elif ephem == 'DE440':
             yr = 15
