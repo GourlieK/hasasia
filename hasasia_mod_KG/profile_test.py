@@ -171,29 +171,38 @@ def pickle_enterprise(pickle_dir):
         ePsrs = pickle.load(f)
         return ePsrs
 
-def enterprise_hdf5(ePsrs:list, noise:dict, yr:float, edir:str, thin):
+def enterprise_hdf5(ePsrs:list, noise:dict, yr:float, edir:str):
     """Writes enterprise.pulsar objects onto HDF5 file with WN Covariance matrix attributes.
 
     - ePsrs (list): List of enterprise.pulsar objects
     - edir: Directory in which to store HDF5 file under
     """
+    thin_file = open(path+'/thin_vals.txt', 'w')
     Tspan = hsen.get_Tspan(ePsrs)
     with h5py.File(edir, 'w') as f:
         Tspan_h5 = f.create_dataset('Tspan', (1,), float)
         Tspan_h5[:] = Tspan
         #numpy array stored with placeholders so names can be indexed into it later, also storing strings as bytes
-        name_list = np.array(['X' for _ in range(kill_count)], dtype=h5py.string_dtype(encoding='utf-8'))
+        name_list = np.array(['X' for _ in range(len(ePsrs))], dtype=h5py.string_dtype(encoding='utf-8'))
         #pseudo while/for-loop designed to delete first entry
         i = 0
         while True:
-            ePsrs[0].N = make_corr(ePsrs[0], noise, yr)[::thin, ::thin]
+            print(f'{ePsrs[0].name}\t{ePsrs[0].toas.size}\n')
+            if ePsrs[0].toas.size > 2e4:
+                ePsrs[0].thin = 5
+            else:
+                ePsrs[0].thin = 1
+            thin_file.write(f'{ePsrs[0].name}\t{ePsrs[0].thin}\n')
+            thin_file.flush()
+
+            ePsrs[0].N = make_corr(ePsrs[0], noise, yr)[::ePsrs[0].thin, ::ePsrs[0].thin]
             hdf5_psr = f.create_group(ePsrs[0].name)
-            hdf5_psr.create_dataset('toas', ePsrs[0].toas.shape, ePsrs[0].toas.dtype, data=ePsrs[0].toas)
-            hdf5_psr.create_dataset('toaerrs', ePsrs[0].toaerrs.shape,ePsrs[0].toaerrs.dtype, data=ePsrs[0].toaerrs)
+            hdf5_psr.create_dataset('toas', ePsrs[0].toas[::ePsrs[0].thin].shape, ePsrs[0].toas[::ePsrs[0].thin].dtype, data=ePsrs[0].toas[::ePsrs[0].thin])
+            hdf5_psr.create_dataset('toaerrs', ePsrs[0].toaerrs[::ePsrs[0].thin].shape,ePsrs[0].toaerrs[::ePsrs[0].thin].dtype, data=ePsrs[0].toaerrs[::ePsrs[0].thin])
             hdf5_psr.create_dataset('phi', (1,), float, data=ePsrs[0].phi)
             hdf5_psr.create_dataset('theta', (1,), float, data=ePsrs[0].theta)
-            hdf5_psr.create_dataset('designmatrix', ePsrs[0].Mmat.shape, ePsrs[0].Mmat.dtype, data=ePsrs[0].Mmat)
-            hdf5_psr.create_dataset('N', ePsrs[0].N.shape, ePsrs[0].N.dtype, data=ePsrs[0].N)
+            hdf5_psr.create_dataset('designmatrix', ePsrs[0].Mmat[::ePsrs[0].thin,:].shape, ePsrs[0].Mmat[::ePsrs[0].thin,:].dtype, data=ePsrs[0].Mmat[::ePsrs[0].thin,:], compression="gzip", compression_opts=compress_val)
+            hdf5_psr.create_dataset('N', ePsrs[0].N.shape, ePsrs[0].N.dtype, data=ePsrs[0].N, compression="gzip", compression_opts=compress_val)
             hdf5_psr.create_dataset('pdist', (2,), float, data=ePsrs[0].pdist)
             name_list[i] = ePsrs[0].name
             f.flush()
@@ -205,6 +214,7 @@ def enterprise_hdf5(ePsrs:list, noise:dict, yr:float, edir:str, thin):
             
         f.create_dataset('names',data = name_list)
         f.flush()
+        thin_file.close()
         print('enterprise.pulsars successfully saved to HDF5\n')
 
 
@@ -216,9 +226,9 @@ def hsen_pulsar_entry(psr:hsen.Pulsar, dir:str):
         hdf5_psr.create_dataset('toaerrs', psr.toaerrs.shape,psr.toaerrs.dtype, data=psr.toaerrs)
         hdf5_psr.create_dataset('phi', (1,), float, data=psr.phi)
         hdf5_psr.create_dataset('theta', (1,), float, data=psr.theta)
-        hdf5_psr.create_dataset('designmatrix', psr.designmatrix.shape, psr.designmatrix.dtype, data=psr.designmatrix)
-        hdf5_psr.create_dataset('G', psr.G.shape, psr.G.dtype, data=psr.G)
-        hdf5_psr.create_dataset('K_inv', psr.K_inv.shape, psr.K_inv.dtype, data=psr.K_inv)
+        hdf5_psr.create_dataset('designmatrix', psr.designmatrix.shape, psr.designmatrix.dtype, data=psr.designmatrix, compression="gzip", compression_opts=compress_val)
+        hdf5_psr.create_dataset('G', psr.G.shape, psr.G.dtype, data=psr.G, compression="gzip", compression_opts=compress_val)
+        hdf5_psr.create_dataset('K_inv', psr.K_inv.shape, psr.K_inv.dtype, data=psr.K_inv, compression="gzip", compression_opts=compress_val)
         hdf5_psr.create_dataset('pdist', (2,), float, data=psr.pdist)
         f.flush()
         print(f'hasasia pulsar {psr.name} successfully saved to HDF5', end='\r')
@@ -232,10 +242,10 @@ def hsen_pulsar_rrf_creation(pseudo: PseudoPulsar, hsen_dir_rrf:str):
         hsen_dir_rrf (str): directory for storing hasasia pulsar object
     """
     start_time = time.time()
-    psr = hsen.Pulsar(toas=pseudo.toas[::thin],
-                                    toaerrs=pseudo.toaerrs[::thin],
+    psr = hsen.Pulsar(toas=pseudo.toas,
+                                    toaerrs=pseudo.toaerrs,
                                     phi=pseudo.phi,theta=pseudo.theta, 
-                                    N=pseudo.N, designmatrix=pseudo.Mmat[::thin,:], pdist=pseudo.pdist)
+                                    N=pseudo.N, designmatrix=pseudo.Mmat, pdist=pseudo.pdist)
     psr.name = pseudo.name
     _ = psr.K_inv
     end_time = time.time()
@@ -626,8 +636,8 @@ def chains_puller(num: int, yr:float):
 
 
 
-def save_h_c(data_path, hc_dsc, hc_sc, a_gw, gam_gw, freqs, batch_num: int): 
-    with h5py.File(data_path, 'a') as f:
+def save_h_c(h_c_data_path, hc_dsc, hc_sc, a_gw, gam_gw, freqs, batch_num: int): 
+    with h5py.File(h_c_data_path, 'a') as f:
         hdf5 = f.create_group(f'batch_{batch_num}')
         hdf5.create_dataset('A_gw', (1,), float, data=a_gw)
         hdf5.create_dataset('gam_gw', (1,), float, data=gam_gw)
@@ -660,7 +670,7 @@ def sens_gen():
         rrf_sc = hsen.GWBSensitivityCurve(specs_rrf)
         rrf_dsc = hsen.DeterSensitivityCurve(specs_rrf)
         del specs_rrf
-        save_h_c(data_path, rrf_dsc.h_c, rrf_sc.h_c,
+        save_h_c(h_c_data_path, rrf_dsc.h_c, rrf_sc.h_c,
                     10**gw_log10_A_samples[i], gw_gam_samples[i], rrf_sc.freqs, i)
         del rrf_sc
         del rrf_dsc
@@ -701,24 +711,24 @@ if __name__ == '__main__':
     #max is 34 for 11yr dataset
     #max is 45 for 12.5yr dataset
     #max is 67 for 15yr dataset
-    kill_count = 67
-    num_chains = 1000
-    thin = 2
+    kill_count = 3
+    num_chains = 3
     gwb_harms = 15
     irn_harms = 30
+    #compress_val = 0 means no compression
+    compress_val = 9
     #yr used for making WN correlation matrix, specifically when yr=15
     fyr = 1/(365.25*24*3600)
 
     names_list = []
     with cProfile.Profile() as pr:
         #Realistic PTA datasets
-        #pars, tims, noise, rn_psrs, edir, ephem = yr_11_data()
-        #pars, tims, noise, rn_psrs, edir, ephem = yr_12_data()
-        pars, tims, noise, rn_psrs, edir, ephem = yr_15_data()
+        pars, tims, noise, rn_psrs, edir, ephem = yr_12_data()
+        #pars, tims, noise, rn_psrs, edir, ephem = yr_15_data()
 
         if ephem == 'DE436':
             yr = 11
-        elif ephem == 'DE4380':
+        elif ephem == 'DE438':
             yr=12.5
         elif ephem == 'DE440':
             yr = 15
@@ -731,7 +741,7 @@ if __name__ == '__main__':
 
         pkl_psrs = pickle_enterprise(pickle_dir)
         if not os.path.isfile(edir):
-            enterprise_hdf5(pkl_psrs, noise, yr, edir, thin)
+            enterprise_hdf5(pkl_psrs, noise, yr, edir)
             del pkl_psrs
 
         #reading hdf5 file containing enterprise.pulsar attributes
@@ -745,7 +755,7 @@ if __name__ == '__main__':
 
             #reading names encoded as bytes, and re-converting them to strings, and deleting byte names
             names = f['names'][:]
-            for i in range(kill_count):
+            for i in range(len(names)):
                 names_list.append(names[i].decode('utf-8'))
             del names    
                 
@@ -754,8 +764,8 @@ if __name__ == '__main__':
             if not os.path.isfile(hsen_dir_rrf):
                 hsen_rrf_pulsar_hdf5_entire(f, names_list, hsen_dir_rrf)
 
-        data_path = os.path.expanduser(path+'/h_c_data.hdf5')
-        if not os.path.isfile(data_path):
+        h_c_data_path = os.path.expanduser(data_path+'/h_c_data.hdf5')
+        if not os.path.isfile(h_c_data_path):
             sens_gen()
 
     with open(path + '/test_time.txt', 'w') as file:
@@ -771,7 +781,7 @@ if __name__ == '__main__':
         #plotting sensitivity curves
         
         for i in range(num_chains):
-            with h5py.File(data_path, 'r') as data_f:
+            with h5py.File(h_c_data_path, 'r') as data_f:
                 data = data_f['batch_'+str(i)]
                 freqs = data['freqs'][:]
                 h_sc_matrix[:,i] = data['hc_sc'][:]
