@@ -198,8 +198,8 @@ def enterprise_hdf5(ePsrs:list, noise:dict, yr:float, edir:str):
             hdf5_psr.create_dataset('toaerrs', ePsrs[0].toaerrs[::ePsrs[0].thin].shape,ePsrs[0].toaerrs[::ePsrs[0].thin].dtype, data=ePsrs[0].toaerrs[::ePsrs[0].thin])
             hdf5_psr.create_dataset('phi', (1,), float, data=ePsrs[0].phi)
             hdf5_psr.create_dataset('theta', (1,), float, data=ePsrs[0].theta)
-            hdf5_psr.create_dataset('designmatrix', ePsrs[0].Mmat[::ePsrs[0].thin,:].shape, ePsrs[0].Mmat[::ePsrs[0].thin,:].dtype, data=ePsrs[0].Mmat[::ePsrs[0].thin,:])
-            hdf5_psr.create_dataset('N', ePsrs[0].N.shape, ePsrs[0].N.dtype, data=ePsrs[0].N)
+            hdf5_psr.create_dataset('designmatrix', ePsrs[0].Mmat[::ePsrs[0].thin,:].shape, ePsrs[0].Mmat[::ePsrs[0].thin,:].dtype, data=ePsrs[0].Mmat[::ePsrs[0].thin,:], compression="gzip", compression_opts=compress_val)
+            hdf5_psr.create_dataset('N', ePsrs[0].N.shape, ePsrs[0].N.dtype, data=ePsrs[0].N, compression="gzip", compression_opts=compress_val)
             hdf5_psr.create_dataset('pdist', (2,), float, data=ePsrs[0].pdist)
             name_list[i] = ePsrs[0].name
             f.flush()
@@ -224,10 +224,10 @@ def hsen_pulsar_entry(psr:hsen.Pulsar, dir:str):
         hdf5_psr.create_dataset('toaerrs', psr.toaerrs.shape,psr.toaerrs.dtype, data=psr.toaerrs)
         hdf5_psr.create_dataset('phi', (1,), float, data=psr.phi)
         hdf5_psr.create_dataset('theta', (1,), float, data=psr.theta)
-        hdf5_psr.create_dataset('designmatrix', psr.designmatrix.shape, psr.designmatrix.dtype, data=psr.designmatrix)
-        hdf5_psr.create_dataset('G', psr.G.shape, psr.G.dtype, data=psr.G)
+        hdf5_psr.create_dataset('designmatrix', psr.designmatrix.shape, psr.designmatrix.dtype, data=psr.designmatrix, compression="gzip", compression_opts=compress_val)
+        hdf5_psr.create_dataset('G', psr.G.shape, psr.G.dtype, data=psr.G, compression="gzip", compression_opts=compress_val)
         #da.to_hdf5(dir, f"{psr.name}/K_inv", psr.K_inv)   
-        hdf5_psr.create_dataset('K_inv', psr.K_inv.shape, psr.K_inv.dtype, data=psr.K_inv)
+        hdf5_psr.create_dataset('K_inv', psr.K_inv.shape, psr.K_inv.dtype, data=psr.K_inv, compression="gzip", compression_opts=compress_val)
         hdf5_psr.create_dataset('pdist', (2,), float, data=psr.pdist)
         f.flush()
         print(f'hasasia pulsar {psr.name} successfully saved to HDF5', end='\r')
@@ -448,7 +448,7 @@ def yr_11_data():
            'J2145-0750':[10**-12.6893, 1.32307],
            }
 
-    edir = data_path+'/11_yr_enterprise_pulsars.hdf5'
+    edir = '/11_yr_enterprise_pulsars.hdf5'
     ephem = 'DE436'
     return pars, tims, noise, rn_psrs, edir, ephem
 
@@ -519,7 +519,7 @@ def yr_12_data():
             elif key == gamma_key:
                 rn_psrs[name][1] = noise[gamma_key]
 
-    edir = data_path+'/12_yr_enterprise_pulsars.hdf5'
+    edir = '/12_yr_enterprise_pulsars.hdf5'
     ephem = 'DE438'
     
     return pars, tims, noise, rn_psrs, edir, ephem
@@ -615,7 +615,7 @@ def yr_15_data():
             elif key == gamma_key:
                 rn_psrs[name][1] = noise[gamma_key]
 
-    edir = data_path+'/15_yr_enterprise_pulsars.hdf5'
+    edir = '/15_yr_enterprise_pulsars.hdf5'
     ephem = 'DE440'
 
     return pars, tims, noise, rn_psrs, edir, ephem
@@ -651,12 +651,6 @@ def chains_puller(num: int):
 
 
 if __name__ == '__main__':
-    data_path = os.path.expanduser('~/psr_data')
-    try:
-        os.mkdir(data_path)
-    except FileExistsError:
-        print('Pulsar data folder exists.\nLoading data...')
-    
     null_time = time.time()
     log_path = path+'/time_mem_data.txt'
     #this will allow memory profile data to run in parallel with the rest of the program
@@ -668,7 +662,7 @@ if __name__ == '__main__':
     #max is 34 for 11yr dataset
     #max is 45 for 12yr dataset
     #max is 67 for 15yr dataset
-    kill_count =  34
+    kill_count =  3
     irn_harms = 30
     gwb_harms = 15
     #yr used for making WN correlation matrix, specifically when yr=15
@@ -676,6 +670,8 @@ if __name__ == '__main__':
     #GWB parameters
     A_gw = 1.73e-15
     gam_gw = 13/3
+    #compress_val=0 means no compression
+    compress_val = 9
 
 
     names_list = []
@@ -691,6 +687,14 @@ if __name__ == '__main__':
             yr=12.5
         elif ephem == 'DE440':
             yr = 15
+
+        data_path = os.path.expanduser(f'~/psr_data_{yr}_yr')
+        try:
+            os.mkdir(data_path)
+        except FileExistsError:
+            print('Pulsar data folder exists.\nLoading data...')
+        
+        edir = data_path + edir
 
         pickle_dir = os.path.expanduser(data_path+f'/{yr}_enterprise_pulsars.pkl')
         if not os.path.isfile(pickle_dir):
