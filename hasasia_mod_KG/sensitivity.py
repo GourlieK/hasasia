@@ -26,14 +26,27 @@ from utils import create_design_matrix
 #KG: test imports and files
 from memory_profiler import profile 
 path = r'/home/gourliek/Desktop/Profile_Data'
-#memory profile for Default NcalInv computation
-get_NcalInv_mem = open(path + '/NcalInv_mem.txt','w')
-#memory profile for Rank Redduced Formalism NcalInv computation
-get_NcalInv_RFF_mem = open(path + '/NcalInvRRF_mem.txt','w')
-#memory profile for computation of K_inv
-get_K_inv_mem = open(path + '/get_K_inv_mem.txt','w')
-#memory profile for computation of correlation matrix for the Red Noise, which is needed for default
-corr_from_psd_mem = open(path + '/corr_from_psd_mem.txt','w')
+
+#7 files will be created before this script is ran
+if len(os.listdir(path)) == 7:
+    #memory profile for Default NcalInv computation
+    get_NcalInv_mem = open(path + '/NcalInv_mem.txt','w')
+    #memory profile for Rank Redduced Formalism NcalInv computation
+    get_NcalInv_RFF_mem = open(path + '/NcalInvRRF_mem.txt','w')
+    #memory profile for computation of K_inv
+    get_K_inv_mem = open(path + '/get_K_inv_mem.txt','w')
+    #memory profile for computation of correlation matrix for the Red Noise, which is needed for default
+    corr_from_psd_mem = open(path + '/corr_from_psd_mem.txt','w')
+
+#it is set to read that way the files are not wiped cleaned, and can't be wrote too
+else:
+    get_NcalInv_mem = open(path + '/NcalInv_mem.txt','r')
+    #memory profile for Rank Redduced Formalism NcalInv computation
+    get_NcalInv_RFF_mem = open(path + '/NcalInvRRF_mem.txt','r')
+    #memory profile for computation of K_inv
+    get_K_inv_mem = open(path + '/get_K_inv_mem.txt','r')
+    #memory profile for computation of correlation matrix for the Red Noise, which is needed for default
+    corr_from_psd_mem = open(path + '/corr_from_psd_mem.txt','r')
 
 current_path = os.path.abspath(hasasia.__path__[0])
 sc_dir = os.path.join(current_path,'sensitivity_curves/')
