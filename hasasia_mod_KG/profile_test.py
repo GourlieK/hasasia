@@ -204,6 +204,13 @@ def enterprise_hdf5(ePsrs:list, noise:dict, yr:float, edir:str):
                 ePsrs[0].thin = 5
             else:
                 ePsrs[0].thin = 1
+
+
+#########################################################################################################
+            #ePsrs[0].thin = 10
+#########################################################################################################
+
+
             thin_file.write(f'{ePsrs[0].name}\t{ePsrs[0].thin}\n')
             thin_file.flush()
 
@@ -635,7 +642,7 @@ def yr_15_data():
 
     return pars, tims, noise, rn_psrs, edir, ephem
 
-def chains_puller(num: int):
+def chains_puller(yr:float):
     """_summary_: Reads generated chains from the 12.5 yr data, varying spectral index, 30 frequencies, from the DE438 ephemeris.
 
     Resource: https://nanograv.org/science/data/125-year-stochastic-gravitational-wave-background-search
@@ -646,22 +653,58 @@ def chains_puller(num: int):
     Returns:
         Two numpy arrays containing the random samples
     """
-    chain_path = os.path.expanduser('~/Nanograv/12p5yr_varying_sp_ind_30freqs/12p5yr_DE438_model2a_cRN30freq_gammaVary_chain.hdf5')
-    with h5py.File(chain_path, 'r') as chainf:
-        params = chainf['params'][:]
-        samples = np.array(chainf['samples'][:])
-        
-    list_params = [item.decode('utf-8') for item in params]
-    
-    gw_log10_A_ind = list_params.index('gw_log10_A')
-    gw_gamma_ind = list_params.index('gw_gamma')
+    if yr == 12.5:
+        chain_path = os.path.expanduser('~/Nanograv/12p5yr_varying_sp_ind_30freqs/12p5yr_DE438_model2a_cRN30freq_gammaVary_chain.hdf5')
+        with h5py.File(chain_path, 'r') as chainf:
+            params = chainf['params'][:]
+            samples = np.array(chainf['samples'][:])
+            
+        list_params = [item.decode('utf-8') for item in params]
 
-    gw_log10_A_samples = samples[30000:,gw_log10_A_ind]
-    gw_gamma_samples = samples[30000:,gw_gamma_ind]
+        lnpost = samples[:,-4]
+        lnlike = samples[:,-3]
+        chain_accept = samples[:,-2]
+        pt_chain_accept = samples[:,-1]
+
+        lnpost_max = np.argmax(lnpost)
+        
+        gw_log10_A_ind = list_params.index('gw_log10_A')
+        gw_gamma_ind = list_params.index('gw_gamma')
+
+        gw_log10_A_samples = samples[30000:,gw_log10_A_ind]
+        gw_gamma_samples = samples[30000:,gw_gamma_ind]
     
-    rand_samples_ind = np.random.choice(a=gw_log10_A_samples.shape[0], size=num, replace=False)
+        
+        return gw_log10_A_samples[lnpost_max], gw_gamma_samples[lnpost_max]
     
-    return gw_log10_A_samples[rand_samples_ind], gw_gamma_samples[rand_samples_ind]
+    elif yr == 15:
+        chain_path = os.path.expanduser('~/Nanograv/NANOGrav15yr_PulsarTiming_v2.0.0/minish/jpg00017/NANOGrav15yr_PulsarTiming_v2.0.0/curn_gamma_14f_noBE/data/taylor_group/nihan_pol/15yr_v1p1/pint/model_2a_vg_noBE_14f/')
+        chain_par = chain_path+r'pars.txt'
+        chain_chains = chain_path+r'chain_1.0.txt'
+
+        list_params = []
+        with open(chain_par, 'r') as file:
+            for line in file:
+                line = line.strip('\n')
+                list_params.append(line)
+
+        gw_log10_A_ind = list_params.index('gw_crn_log10_A')
+        gw_gamma_ind = list_params.index('gw_crn_gamma')
+
+        with open(chain_chains, 'r') as file:
+            samples = np.loadtxt(file)
+
+        lnpost = samples[:,-4]
+        lnlike = samples[:,-3]
+        chain_accept = samples[:,-2]
+        pt_chain_accept = samples[:,-1]
+
+        lnpost_max = np.argmax(lnpost)
+
+        gw_log10_A_samples = samples[30000:,gw_log10_A_ind]
+        gw_gamma_samples = samples[30000:,gw_gamma_ind]
+        
+        return gw_log10_A_samples[lnpost_max], gw_gamma_samples[lnpost_max]
 
 
 
@@ -677,15 +720,14 @@ if __name__ == '__main__':
     #max is 34 for 11yr dataset
     #max is 45 for 12yr dataset
     #max is 67 for 15yr dataset
-    kill_count =  3
+    kill_count =  67
     max_harm = 70
     irn_harms = max_harm
     gwb_harms = max_harm
     #yr used for making WN correlation matrix, specifically when yr=15
     fyr = 1/(365.25*24*3600)
     #GWB parameters
-    A_gw = 1.73e-15
-    gam_gw = 13/3
+    
     #compress_val=0 means no compression
     compress_val = 0
 
@@ -693,16 +735,26 @@ if __name__ == '__main__':
     names_list = []
     with cProfile.Profile() as pr:
         #Realistic PTA datasets
-        pars, tims, noise, rn_psrs, edir, ephem = yr_11_data()
+        #pars, tims, noise, rn_psrs, edir, ephem = yr_11_data()
         #pars, tims, noise, rn_psrs, edir, ephem = yr_12_data()
-        #pars, tims, noise, rn_psrs, edir, ephem = yr_15_data()
+        pars, tims, noise, rn_psrs, edir, ephem = yr_15_data()
         
         if ephem == 'DE436':
             yr = 11
+            A_gw = 1.73e-15
+            gam_gw = 13./3
         elif ephem == 'DE438':
             yr=12.5
+            log10_A_gw, gam_gw = chains_puller(yr)
+            A_gw = 10**log10_A_gw
         elif ephem == 'DE440':
             yr = 15
+            log10_A_gw, gam_gw = chains_puller(yr)
+            A_gw = 10**log10_A_gw
+
+        print(f'A_gw: {A_gw}\tgam_gw: {gam_gw}')
+        with open(path+'/spectra_total_time.txt', 'w') as file:
+            file.write(f'A_gw: {A_gw}\tgam_gw: {gam_gw}\n')
 
         data_path = os.path.expanduser(f'~/psr_data_{yr}_yr')
         try:
