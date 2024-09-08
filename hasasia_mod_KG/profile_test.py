@@ -16,7 +16,7 @@ from enterprise.pulsar import Pulsar as ePulsar
 from memory_profiler import profile
 
 #Memory Profile File Locations
-path = os.path.expanduser('~/Desktop/Profile_Data')
+path = os.path.expanduser('~/Profile_Data')
 #creation of folder to store profile data
 try:
     os.mkdir(path)
@@ -676,15 +676,17 @@ if __name__ == '__main__':
     ###################################################
     #max is 45 for 12yr dataset
     #max is 67 for 12yr dataset
-    kill_count = 45
+    kill_count = 67
     num_chains = 50
     thin = 20
+    freq_harm_irn = 30
+    freq_gwb = 14
     fyr = 1/(365.25*24*3600)
 
     names_list = []
     with cProfile.Profile() as pr:
         #Realistic PTA datasets
-        pars, tims, noise, edir, ephem = yr_12_data()
+        #pars, tims, noise, edir, ephem = yr_12_data()
         pars, tims, noise, edir, ephem = yr_15_data()
 
         if ephem == 'DE438':
@@ -705,8 +707,8 @@ if __name__ == '__main__':
             Tspan = f['Tspan'][:][0]
 
             freqs = np.logspace(np.log10(1/(5*Tspan)),np.log10(2e-7),400)
-            freqs_rn = np.linspace(1/Tspan, 30/Tspan, 30)
-            freqs_gwb = np.linspace(1/Tspan, 14/Tspan, 14)
+            freqs_rn = np.linspace(1/Tspan, freq_harm_irn/Tspan, freq_harm_irn)
+            freqs_gwb = np.linspace(1/Tspan, freq_gwb/Tspan, freq_gwb)
 
             #reading names encoded as bytes, and re-converting them to strings, and deleting byte names
             names = f['names'][:]
