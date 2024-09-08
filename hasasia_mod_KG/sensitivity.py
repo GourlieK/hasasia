@@ -25,7 +25,7 @@ from utils import create_design_matrix
 
 #KG: test imports and files
 from memory_profiler import profile 
-path = r'/home/gourliek/Desktop/Profile_Data'
+path = os.path.expanduser('~/Profile_Data')
 #memory profile for Default NcalInv computation
 get_NcalInv_mem = open(path + '/NcalInv_mem.txt','w')
 #memory profile for Rank Redduced Formalism NcalInv computation

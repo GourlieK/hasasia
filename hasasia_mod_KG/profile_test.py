@@ -1,7 +1,7 @@
 #Kyle Gourlie
 #7/23/2024
 #library imports
-import os, shutil, psutil, time, threading, random, h5py, gc, glob, json, cProfile, pstats, jax, pickle
+import os, psutil, time, threading, h5py, glob, json, cProfile, pstats, jax, pickle
 import numpy as np
 import scipy.linalg as sl
 import matplotlib.pyplot as plt
@@ -13,7 +13,7 @@ from enterprise.pulsar import Pulsar as ePulsar
 from memory_profiler import profile
 
 #Memory Profile File Locations
-path = os.path.expanduser('~/Desktop/Profile_Data')
+path = os.path.expanduser('~/Profile_Data')
 #creation of folder to store profile data
 #DONT delete automatically because contains h_c data
 try:
@@ -329,74 +329,6 @@ def hsen_spectrum_creation_rrf(pseudo:PseudoSpectraPulsar, gam_gw, A_gw)-> hsen.
     return spec_psr
 
 
-def yr_11_data():
-    """Creates enterprise pulsars from the 11 yr dataset from parameter and timing files.
-
-    The quantities that are being returned within this function will be attributes used to write 
-    enterprise pulsars onto HDF5 file for 
-
-    Returns:
-        - psr_list (list): List of pulsars names
-        - enterprise_Psrs (list): List of enterprise pulsars 
-        - noise (dict): Noise parameters including fe/be of WN and RN.
-        - rn_psrs (dict): RN parameters where key is name of pulsar and value is list where 0th 
-        index is spectral amplitude and 1st index is spectral index
-        - Tspan: Total timespan of the PTA
-        - enterprise_dir: specific directory name used for enterprise HDF5 file
-    """
-    
-    #File Paths
-    pardir = '/home/gourliek/Nanograv/11yr_stochastic_analysis-master/nano11y_data/partim/'
-    timdir = '/home/gourliek/Nanograv/11yr_stochastic_analysis-master/nano11y_data/partim/'
-    noise_dir = '/home/gourliek/Nanograv/11yr_stochastic_analysis-master'
-    noise_dir += '/nano11y_data/noisefiles/'
-    psr_list_dir = '/home/gourliek/Nanograv/11yr_stochastic_analysis-master/psrlist.txt'
-
-    #organizes files into alphabetical order
-    pars = sorted(glob.glob(pardir+'*.par'))
-    tims = sorted(glob.glob(timdir+'*.tim'))
-    noise_files = sorted(glob.glob(noise_dir+'*.json'))
-
-    #saving pulsar names as a list
-    with open(psr_list_dir, 'r') as psr_list_file:
-        psr_list = []
-        for line in psr_list_file:
-            new_line = line.strip("\n")
-            psr_list.append(new_line)
-
-    #filtering par and tim files to make sure they only include names found in pulsar list
-    pars = [f for f in pars if get_psrname(f) in psr_list]
-    tims = [f for f in tims if get_psrname(f) in psr_list]
-    noise_files = [f for f in noise_files if get_psrname(f) in psr_list]
-    
-    if len(pars) == len(tims) and len(tims) == len(noise_files):
-        pass
-    else:
-        print("ERROR. Filteration of tim and par files performed incorrectly")
-        exit()
-
-    noise = {}
-    for nf in noise_files:
-        with open(nf,'r') as fin:
-            noise.update(json.load(fin))
-
-    rn_psrs = {'B1855+09':[10**-13.7707, 3.6081],      #
-           'B1937+21':[10**-13.2393, 2.46521],
-           'J0030+0451':[10**-14.0649, 4.15366],
-           'J0613-0200':[10**-13.1403, 1.24571],
-           'J1012+5307':[10**-12.6833, 0.975424],
-           'J1643-1224':[10**-12.245, 1.32361],
-           'J1713+0747':[10**-14.3746, 3.06793],
-           'J1747-4036':[10**-12.2165, 1.40842],
-           'J1903+0327':[10**-12.2461, 2.16108],
-           'J1909-3744':[10**-13.9429, 2.38219],
-           'J2145-0750':[10**-12.6893, 1.32307],
-           }
-
-    edir = data_path+'/11_yr_enterprise_pulsars.hdf5'
-    ephem = 'DE436'
-    return pars, tims, noise, rn_psrs, edir, ephem
-
 def yr_12_data():
     """Creates enterprise pulsars from the 12.5 yr dataset from parameter and timing files.
 
@@ -418,10 +350,6 @@ def yr_12_data():
     tim_dir = data_dir + r'tim/'
     noise_file = data_dir + r'channelized_12p5yr_v3_full_noisedict.json' 
 
-    #directory name of enterprise hdf5 file
-    
-    
-    
     #sorting parameter and timing files
     parfiles = sorted(glob.glob(par_dir+'*.par'))
     timfiles = sorted(glob.glob(tim_dir+'*.tim'))
@@ -468,7 +396,7 @@ def yr_12_data():
             elif key == gamma_key:
                 rn_psrs[name][1] = noise[gamma_key]
 
-    edir = data_path+'/12_yr_enterprise_pulsars.hdf5'
+    edir = '/12_yr_enterprise_pulsars.hdf5'
     ephem = 'DE438'
     
     return pars, tims, noise, rn_psrs, edir, ephem
@@ -564,7 +492,7 @@ def yr_15_data():
             elif key == gamma_key:
                 rn_psrs[name][1] = noise[gamma_key]
 
-    edir = data_path+'/15_yr_enterprise_pulsars.hdf5'
+    edir = '/15_yr_enterprise_pulsars.hdf5'
     ephem = 'DE440'
 
     return pars, tims, noise, rn_psrs, edir, ephem
@@ -694,12 +622,6 @@ def sigma_grab(sigma:int):
 
 
 if __name__ == '__main__':
-    data_path = os.path.expanduser('~/psr_data')
-    try:
-        os.mkdir(data_path)
-    except FileExistsError:
-        print('Pulsar data folder exists.\nLoading data...')
-    
     null_time = time.time()
     log_path = path+'/time_mem_data.txt'
     #this will allow memory profile data to run in parallel with the rest of the program
@@ -713,7 +635,7 @@ if __name__ == '__main__':
     #max is 67 for 15yr dataset
     kill_count = 3
     num_chains = 3
-    gwb_harms = 15
+    gwb_harms = 14
     irn_harms = 30
     #compress_val = 0 means no compression
     compress_val = 9
@@ -723,8 +645,8 @@ if __name__ == '__main__':
     names_list = []
     with cProfile.Profile() as pr:
         #Realistic PTA datasets
-        pars, tims, noise, rn_psrs, edir, ephem = yr_12_data()
-        #pars, tims, noise, rn_psrs, edir, ephem = yr_15_data()
+        #pars, tims, noise, rn_psrs, edir, ephem = yr_12_data()
+        pars, tims, noise, rn_psrs, edir, ephem = yr_15_data()
 
         if ephem == 'DE436':
             yr = 11
@@ -732,6 +654,15 @@ if __name__ == '__main__':
             yr=12.5
         elif ephem == 'DE440':
             yr = 15
+
+        data_path = os.path.expanduser(f'~/psr_data_{yr}_yr')
+        try:
+            os.mkdir(data_path)
+        
+        except FileExistsError:
+            print('Pulsar data folder exists.\nLoading data...')
+        
+        edir = data_path + edir
 
         pickle_dir = os.path.expanduser(data_path+f'/{yr}_enterprise_pulsars.pkl')
         if not os.path.isfile(pickle_dir):
