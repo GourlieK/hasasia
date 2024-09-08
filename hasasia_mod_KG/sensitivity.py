@@ -3,7 +3,7 @@ from __future__ import print_function
 """Main module."""
 import numpy  as np
 import dask.array as da
-import hasasia, jax, functools
+import jax, functools
 from functools import cached_property
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
@@ -25,7 +25,7 @@ from utils import create_design_matrix
 
 #KG: test imports and files
 from memory_profiler import profile 
-path = r'/home/gourliek/Desktop/Profile_Data'
+path = os.path.expanduser('~/Profile_Data')
 #memory profile for Default NcalInv computation
 get_NcalInv_mem = open(path + '/NcalInv_mem.txt','w')
 #memory profile for Rank Redduced Formalism NcalInv computation
@@ -35,8 +35,8 @@ get_K_inv_mem = open(path + '/get_K_inv_mem.txt','w')
 #memory profile for computation of correlation matrix for the Red Noise, which is needed for default
 corr_from_psd_mem = open(path + '/corr_from_psd_mem.txt','w')
 
-current_path = os.path.abspath(hasasia.__path__[0])
-sc_dir = os.path.join(current_path,'sensitivity_curves/')
+#current_path = os.path.abspath(hasasia.__path__[0])
+#sc_dir = os.path.join(current_path,'sensitivity_curves/')
 
 __all__ =['GWBSensitivityCurve',
           'DeterSensitivityCurve',
