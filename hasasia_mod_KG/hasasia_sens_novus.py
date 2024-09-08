@@ -1,7 +1,7 @@
 #Kyle Gourlie
 #7/23/2024
 #library imports
-import os, shutil, psutil, time, threading, random, h5py, pickle, glob, json, cProfile, pstats, subprocess
+import os, psutil, time, threading, h5py, pickle, glob, json, cProfile, pstats, subprocess
 from memory_profiler import memory_usage
 import numpy as np
 import scipy.linalg as sl
@@ -10,9 +10,6 @@ import matplotlib as mpl
 import healpy as hp
 import astropy.units as u
 import astropy.constants as c
-#mpl.rcParams['figure.dpi'] = 300
-#mpl.rcParams['figure.figsize'] = [5,3]
-#mpl.rcParams['text.usetex'] = True
 from enterprise.pulsar import Pulsar as ePulsar
 from memory_profiler import profile
 
@@ -204,9 +201,11 @@ def enterprise_hdf5(ePsrs:list, noise:dict, yr:float, edir:str):
         i = 0
         while True:
             print(f'{ePsrs[0].name}\t{ePsrs[0].toas.size}\n')
-#########################################################################################################
-            ePsrs[0].thin = 1
-#########################################################################################################
+            if ePsrs[0].toas.size >= 20_000:
+                ePsrs[0].thin = 5
+            else:
+                ePsrs[0].thin = 1
+
             thin_file.write(f'{ePsrs[0].name}\t{ePsrs[0].thin}\n')
             thin_file.flush()
 
@@ -244,7 +243,6 @@ def hsen_pulsar_entry(psr:hsen.Pulsar, dir:str):
         hdf5_psr.create_dataset('theta', (1,), float, data=psr.theta)
         hdf5_psr.create_dataset('designmatrix', psr.designmatrix.shape, psr.designmatrix.dtype, data=psr.designmatrix, compression="gzip", compression_opts=compress_val)
         hdf5_psr.create_dataset('G', psr.G.shape, psr.G.dtype, data=psr.G, compression="gzip", compression_opts=compress_val)
-        #da.to_hdf5(dir, f"{psr.name}/K_inv", psr.K_inv)   
         hdf5_psr.create_dataset('K_inv', psr.K_inv.shape, psr.K_inv.dtype, data=psr.K_inv, compression="gzip", compression_opts=compress_val)
         hdf5_psr.create_dataset('pdist', (2,), float, data=psr.pdist)
         f.flush()
@@ -889,16 +887,16 @@ if __name__ == '__main__':
         plt.axvline(x=1/Tspan, label=r'$\frac{1}{\mathrm{Tspan}}$', c='peru', linestyle='--')
         plt.axvline(x=14/Tspan, label=fr'$\frac{{{14}}}{{\mathrm{{Tspan}}}}$', c='teal', linestyle='--')
         plt.axvline(x=30/Tspan, label=fr'$\frac{{{30}}}{{\mathrm{{Tspan}}}}$', c='fuchsia', linestyle='--')
-        plt.loglog(freqs, sc_hc_loaded, label='Norm Stoch', c='red')
-        plt.loglog(freqs, dsc_hc_loaded, label='Norm Det', c='blue')
-        plt.loglog(freqs, rrf_sc_hc_loaded, label='RRF Stoch', c='orange', linestyle='--')
-        plt.loglog(freqs, rrf_dsc_hc_loaded, label='RRF Det', c='cyan', linestyle='--')
+        plt.loglog(freqs, sc_hc_loaded, label='Wiener-Khinchin Stoch', c='red')
+        plt.loglog(freqs, dsc_hc_loaded, label='Wiener-Khinchin Det', c='blue')
+        plt.loglog(freqs, rrf_sc_hc_loaded, label='Fourier Mode Stoch', c='orange', linestyle='--')
+        plt.loglog(freqs, rrf_dsc_hc_loaded, label='Fourier Mode Det', c='cyan', linestyle='--')
         plt.ylabel('Characteristic Strain, $h_c$')
         plt.xlabel('Frequency (Hz)')
         plt.title(f'NANOGrav {yr}-year Data Set Sensitivity Curve')
         plt.grid(which='both', alpha=0.2)
-        plt.legend()
-        plt.savefig(path+'/sc_h_c.png', bbox_inches ="tight", dpi=1000)
+        plt.legend(loc='upper left', font_size='small')
+        plt.savefig(path+'/sc_h_c.svg')
         plt.show()
         plt.close()
 
