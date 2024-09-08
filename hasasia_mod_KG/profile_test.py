@@ -14,7 +14,7 @@ from enterprise.pulsar import Pulsar as ePulsar
 from memory_profiler import profile
 
 #Memory Profile File Locations
-path = os.path.expanduser('~/Desktop/Profile_Data')
+path = os.path.expanduser('~/Profile_Data')
 #creation of folder to store profile data
 
 #check to see if folder exists

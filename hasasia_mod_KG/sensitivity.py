@@ -25,7 +25,7 @@ from utils import create_design_matrix
 
 #KG: test imports and files
 from memory_profiler import profile 
-path = r'/home/gourliek/Desktop/Profile_Data'
+path = os.path.expanduser('~/Profile_Data')
 
 #7 files will be created before this script is ran
 if len(os.listdir(path)) == 7:
