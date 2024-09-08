@@ -1,7 +1,7 @@
 #Kyle Gourlie
 #7/23/2024
 #library imports
-import os, shutil, psutil, time, threading, random, h5py, gc, glob, json, cProfile, pstats, jax
+import os, shutil, psutil, time, threading, pickle, h5py, gc, glob, json, cProfile, pstats, jax
 import numpy as np
 import scipy.linalg as sl
 import matplotlib.pyplot as plt
@@ -155,7 +155,10 @@ def enterprise_creation(pars:list, tims:list, ephem:str)->list:
     count = 1
     for par,tim in zip(pars,tims):
         if count <= kill_count:
-            ePsr = ePulsar(par, tim,  ephem=ephem)
+            if ephem=='DE440':
+                ePsr = ePulsar(par, tim,  ephem=ephem, timing_package='pint')
+            else:
+                ePsr = ePulsar(par, tim,  ephem=ephem)
             enterprise_Psrs.append(ePsr)
             print('\rPSR {0} complete'.format(ePsr.name),end='',flush=True)
             print(f'\n{count} pulsars created')
@@ -163,6 +166,17 @@ def enterprise_creation(pars:list, tims:list, ephem:str)->list:
         else:
             break
     return enterprise_Psrs
+
+
+
+def enterprise_pickle(ePsrs:list, pickle_dir):
+    with open(pickle_dir, 'wb') as f:
+        pickle.dump(ePsrs, f)
+
+def pickle_enterprise(pickle_dir):
+    with open(pickle_dir, 'rb') as f:
+        ePsrs = pickle.load(f)
+        return ePsrs
 
 def enterprise_hdf5(ePsrs:list, noise:dict, yr:float, edir:str, thin):
     """Writes enterprise.pulsar objects onto HDF5 file with WN Covariance matrix attributes.
@@ -405,7 +419,7 @@ def yr_12_data():
     with open(noise_file, 'r') as fp:
         noise.update(json.load(fp))
 
-    edir = '/home/gourliek/12_yr_enterprise_pulsars.hdf5'
+    edir = '/12_yr_enterprise_pulsars.hdf5'
     ephem = 'DE438'
     
     return pars, tims, noise, edir, ephem
@@ -689,17 +703,32 @@ if __name__ == '__main__':
         #pars, tims, noise, edir, ephem = yr_12_data()
         pars, tims, noise, edir, ephem = yr_15_data()
 
-        if ephem == 'DE438':
+        if ephem == 'DE436':
+            yr = 11
+        elif ephem == 'DE438':
             yr=12.5
-           
         elif ephem == 'DE440':
             yr = 15
+
+        data_path = os.path.expanduser(f'~/psr_data_{yr}_yr')
+        try:
+            os.mkdir(data_path)
         
-        #if file does not exist, then re-compute it
-        if not os.path.isfile(edir):
+        except FileExistsError:
+            print('Pulsar data folder exists.\nLoading data...')
+        
+        edir = data_path + edir
+
+        pickle_dir = os.path.expanduser(data_path+f'/{yr}_enterprise_pulsars.pkl')
+        if not os.path.isfile(pickle_dir):
             ePsrs = enterprise_creation(pars, tims, ephem)
-            enterprise_hdf5(ePsrs, noise, yr, edir, thin)
+            enterprise_pickle(ePsrs, pickle_dir)
             del ePsrs
+
+        pkl_psrs = pickle_enterprise(pickle_dir)
+        if not os.path.isfile(edir):
+            enterprise_hdf5(pkl_psrs, noise, yr, edir, thin)
+            del pkl_psrs
 
         #reading hdf5 file containing enterprise.pulsar attributes
         with h5py.File(edir, 'r') as f:
