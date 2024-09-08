@@ -410,7 +410,102 @@ def yr_12_data():
     
     return pars, tims, noise, edir, ephem
 
-def chains_puller(num: int, names_list:list):
+def yr_15_data():
+    data_dir = r'/home/gourliek/Nanograv/NANOGrav15yr_PulsarTiming_v2.0.0/minish/jpg00017/NANOGrav15yr_PulsarTiming_v2.0.0/narrowband/'
+    par_dir = data_dir + r'par/'
+    tim_dir = data_dir + r'tim/'
+    noise_file = data_dir+r'15yr_wn_dict.json'
+    jeremy_psrs =["B1855+09","B1937+21","B1953+29","J0023+0923","J0030+0451","J0340+4130","J0406+3039","J0437-4715","J0509+0856",
+                        "J0557+1551","J0605+3757","J0610-2100","J0613-0200","J0636+5128","J0645+5158","J0709+0458","J0740+6620",
+                        "J0931-1902","J1012+5307","J1012-4235","J1022+1001","J1024-0719","J1125+7819","J1312+0051","J1453+1902",
+                        "J1455-3330","J1600-3053","J1614-2230","J1630+3734","J1640+2224","J1643-1224","J1705-1903","J1713+0747",
+                        "J1719-1438","J1730-2304","J1738+0333","J1741+1351","J1744-1134","J1745+1017","J1747-4036","J1751-2857",
+                        "J1802-2124","J1811-2405","J1832-0836","J1843-1113","J1853+1303","J1903+0327","J1909-3744","J1910+1256",
+                        "J1911+1347","J1918-0642","J1923+2515","J1944+0907","J1946+3417","J2010-1323","J2017+0603","J2033+1734",
+                        "J2043+1711","J2124-3358","J2145-0750","J2214+3000","J2229+2643","J2234+0611","J2234+0944","J2302+4442",
+                        "J2317+1439","J2322+2057"]
+
+    #sorting parameter and timing files
+    parfiles = sorted(glob.glob(par_dir+'*.par'))
+    timfiles = sorted(glob.glob(tim_dir+'*.tim'))
+   
+    filter_parfiles = []
+    for file in parfiles:
+        if 'ao' in file:
+            continue
+        if 'gbt' in file:
+            continue
+        filter_parfiles.append(file)
+
+    filter_timfiles = []
+    for file in timfiles:
+        if 'ao' in file:
+            continue
+        if 'gbt' in file:
+            continue
+        filter_timfiles.append(file)
+    
+    del parfiles, timfiles
+
+    par_psr_names = []
+    for file in filter_parfiles:
+        par_psr_names.append(get_psrname(file))
+    
+
+    tim_psr_names = []
+    for file in filter_timfiles:
+        tim_psr_names.append(get_psrname(file))
+
+    psr_list= [item for item in tim_psr_names if item in par_psr_names]
+    
+    exclude_psr = next(iter(set(psr_list) - set(jeremy_psrs)))
+    
+    pars =[]
+    for file in filter_parfiles:
+        if get_psrname(file) == exclude_psr:
+            continue
+        pars.append(file)
+
+    tims = []
+    for file in filter_timfiles:
+        if get_psrname(file) == exclude_psr:
+            continue
+        tims.append(file)
+    
+    del filter_parfiles, filter_timfiles
+
+    if len(pars) != 67 or len(tims) !=67:
+        exit()
+
+    noise = {}
+    with open(noise_file, 'r') as fp:
+        noise.update(json.load(fp))        
+    
+    rn_psrs = {}
+    for name in psr_list:
+        amp_key = name + '_red_noise_log10_A'
+        gamma_key = name + '_red_noise_gamma'
+        for key in noise:
+            if key == amp_key or key == gamma_key:
+                rn_psrs[name] = ['x','x']
+    
+    #place proper entries
+    for name in jeremy_psrs:
+        amp_key = name + '_red_noise_log10_A'
+        gamma_key = name + '_red_noise_gamma'
+        for key in noise:
+            if key == amp_key:
+                rn_psrs[name][0] = 10**noise[amp_key]  #because parameter is log_10()
+            elif key == gamma_key:
+                rn_psrs[name][1] = noise[gamma_key]
+
+    edir = '/15_yr_enterprise_pulsars.hdf5'
+    ephem = 'DE440'
+
+    return pars, tims, noise, edir, ephem
+
+
+def chains_puller(num: int, names_list:list, yr:float):
     """_summary_: Reads generated chains from the 12.5 yr data, varying spectral index, 30 frequencies, from the DE438 ephemeris.
 
     Resource: https://nanograv.org/science/data/125-year-stochastic-gravitational-wave-background-search
@@ -422,29 +517,90 @@ def chains_puller(num: int, names_list:list):
     Returns:
         Two dictionaries containing instrinsic red noise parameters
     """
-    chain_path = os.path.expanduser('~/Nanograv/12p5yr_varying_sp_ind_30freqs/12p5yr_DE438_model2a_cRN30freq_gammaVary_chain.hdf5')
-    with h5py.File(chain_path, 'r') as chainf:
-        
-        params = chainf['params'][:]
-        samples = np.array(chainf['samples'][:])
-        
-        
-    list_params = [item.decode('utf-8') for item in params]
-    list_params.remove('gw_gamma')
-    list_params.remove('gw_log10_A')
-    irn_params_log10_A = {}
-    irn_params_gam = {}
+    if yr == 12.5:
+        chain_path = os.path.expanduser('~/Nanograv/12p5yr_varying_sp_ind_30freqs/12p5yr_DE438_model2a_cRN30freq_gammaVary_chain.hdf5')
+        with h5py.File(chain_path, 'r') as chainf:
+            
+            params = chainf['params'][:]
+            samples = np.array(chainf['samples'][:])
+            
+            
+        list_params = [item.decode('utf-8') for item in params]
+        lnpost = samples[:,-4]
+        lnlike = samples[:,-3]
+        chain_accept = samples[:,-2]
+        pt_chain_accept = samples[:,-1]
 
-    for name in names_list:
-        log10_A_ind = list_params.index(name+'_red_noise_log10_A')
-        gamma_ind = list_params.index(name+'_red_noise_gamma')
-        log10_A_samples = samples[30000:,log10_A_ind]
-        gamma_samples = samples[30000:,gamma_ind]
-        rand_samples_ind = np.random.choice(a=log10_A_samples.shape[0], size=num, replace=False)
-        irn_params_log10_A[name] = log10_A_samples[rand_samples_ind]
-        irn_params_gam[name] = gamma_samples[rand_samples_ind]
+        lnpost_max = np.argmax(lnpost)
 
-    return irn_params_log10_A, irn_params_gam
+        gw_log10_A_samples = samples[30000:,gw_log10_A_ind]
+        gw_gamma_samples = samples[30000:,gw_gamma_ind]
+
+        gw_log10_A_max = gw_log10_A_samples[lnpost_max]
+        gw_gamma_max = gw_gamma_samples[lnpost_max]
+
+        list_params.remove('gw_gamma')
+        list_params.remove('gw_log10_A')
+        irn_params_log10_A = {}
+        irn_params_gam = {}
+
+        for name in names_list:
+            log10_A_ind = list_params.index(name+'_red_noise_log10_A')
+            gamma_ind = list_params.index(name+'_red_noise_gamma')
+            log10_A_samples = samples[30000:,log10_A_ind]
+            gamma_samples = samples[30000:,gamma_ind]
+            rand_samples_ind = np.random.choice(a=log10_A_samples.shape[0], size=num, replace=False)
+            irn_params_log10_A[name] = log10_A_samples[rand_samples_ind]
+            irn_params_gam[name] = gamma_samples[rand_samples_ind]
+    
+
+    elif yr == 15:
+        chain_path = os.path.expanduser('~/Nanograv/NANOGrav15yr_PulsarTiming_v2.0.0/minish/jpg00017/NANOGrav15yr_PulsarTiming_v2.0.0/curn_gamma_14f_noBE/data/taylor_group/nihan_pol/15yr_v1p1/pint/model_2a_vg_noBE_14f/')
+        chain_par = chain_path+r'pars.txt'
+        chain_chains = chain_path+r'chain_1.0.txt'
+
+        list_params = []
+        with open(chain_par, 'r') as file:
+            for line in file:
+                line = line.strip('\n')
+                list_params.append(line)
+
+        gw_log10_A_ind = list_params.index('gw_crn_log10_A')
+        gw_gamma_ind = list_params.index('gw_crn_gamma')
+
+
+        with open(chain_chains, 'r') as file:
+            samples = np.loadtxt(file)
+
+        lnpost = samples[:,-4]
+        lnlike = samples[:,-3]
+        chain_accept = samples[:,-2]
+        pt_chain_accept = samples[:,-1]
+
+        lnpost_max = np.argmax(lnpost)
+
+        gw_log10_A_samples = samples[30000:,gw_log10_A_ind]
+        gw_gamma_samples = samples[30000:,gw_gamma_ind]
+
+        gw_log10_A_max = gw_log10_A_samples[lnpost_max]
+        gw_gamma_max = gw_gamma_samples[lnpost_max]
+        
+        irn_params_log10_A = {}
+        irn_params_gam = {}
+
+        for name in names_list:
+            log10_A_ind = list_params.index(name+'_red_noise_log10_A')
+            gamma_ind = list_params.index(name+'_red_noise_gamma')
+            log10_A_samples = samples[30000:,log10_A_ind]
+            gamma_samples = samples[30000:,gamma_ind]
+            rand_samples_ind = np.random.choice(a=log10_A_samples.shape[0], size=num, replace=False)
+            irn_params_log10_A[name] = log10_A_samples[rand_samples_ind]
+            irn_params_gam[name] = gamma_samples[rand_samples_ind]
+
+    return irn_params_log10_A, irn_params_gam, gw_log10_A_max, gw_gamma_max
+
+        
+
 
 
 def save_h_c(data_path, hc_dsc, hc_sc, a_gw, gam_gw, freqs, batch_num: int): 
@@ -458,7 +614,7 @@ def save_h_c(data_path, hc_dsc, hc_sc, a_gw, gam_gw, freqs, batch_num: int):
         f.flush()
 
 def sens_gen():
-    log10_A_samples, gam_samples = chains_puller(num_chains, names_list)
+    log10_A_samples, gam_samples, gw_log10_A_max, gw_gamma_max = chains_puller(num_chains, names_list, yr=yr)
     for i in range(num_chains):
         time_start_bt = time.time()
         
@@ -477,7 +633,7 @@ def sens_gen():
                 print(f'IRN Spectral Amplitude:{10**psr_log10_A}')
                 hsen_psr_RRF_spec_mem.write(f'Pulsar: {name}\n')
                 hsen_psr_RRF_spec_mem.flush()
-                spec_psr_rrf = hsen_spectrum_creation_rrf(pseudo, gam_gw=gam_gw, A_gw= A_gw, A_irn=10**psr_log10_A, gam_irn=psr_gam)
+                spec_psr_rrf = hsen_spectrum_creation_rrf(pseudo, gam_gw=gw_gamma_max, A_gw= 10**gw_log10_A_max, A_irn=10**psr_log10_A, gam_irn=psr_gam)
                 specs_rrf.append(spec_psr_rrf)
                 
         #creation of sensitivity curves rank-reduced method
@@ -518,24 +674,25 @@ if __name__ == '__main__':
     logging_thread.start()
 
     ###################################################
-    #max is 34 for 11yr dataset
     #max is 45 for 12yr dataset
+    #max is 67 for 12yr dataset
     kill_count = 45
     num_chains = 50
     thin = 20
-    A_gw = 1.73e-15
-    gam_gw = 13/3
-
-    #yr used for making WN correlation matrix, specifically when yr=15
-    yr=12
     fyr = 1/(365.25*24*3600)
 
     names_list = []
     with cProfile.Profile() as pr:
         #Realistic PTA datasets
-        #pars, tims, noise, edir, ephem = yr_11_data()
         pars, tims, noise, edir, ephem = yr_12_data()
+        pars, tims, noise, edir, ephem = yr_15_data()
 
+        if ephem == 'DE438':
+            yr=12.5
+           
+        elif ephem == 'DE440':
+            yr = 15
+        
         #if file does not exist, then re-compute it
         if not os.path.isfile(edir):
             ePsrs = enterprise_creation(pars, tims, ephem)
@@ -615,8 +772,6 @@ if __name__ == '__main__':
     plt.fill_between(freqs, h_sc_sigma_low, h_sc_sigma_high, color='gray', label='1$\sigma$ Stoch')
     plt.fill_between(freqs, h_dsc_sigma_low, h_dsc_sigma_high, color='orange', label='1$\sigma$ Det')
 
-    
-    plt.tight_layout()
     plt.xlabel('Frequencies, Hz')
     plt.ylabel('Characteristic Strain, $h_c$')
     plt.grid(which='both')
