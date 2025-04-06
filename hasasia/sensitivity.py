@@ -882,8 +882,9 @@ class Spectrum_RRF(object):
         Optionally supply an array of frequencies over which to build the
         various spectral densities.
     """
-    def __init__(self, psr, Tspan, freqs_gw_comp, amp_gw, gamma_gw, freqs_irn_comp, amp_irn = None, gamma_irn = None, nf=400, fmin=None,
-                  fmax=2e-7, freqs=None,  tm_fit=True, **Tf_kwargs):
+    def __init__(self, psr:Pulsar, Tspan:float, freqs_gw_comp:int, amp_gw:float, gamma_gw:float,
+                freqs_irn_comp:int, amp_irn = None, gamma_irn = None, nf=400, fmin=None,
+                fmax=2e-7, freqs=None,  tm_fit=True, **Tf_kwargs):
         self._H_0 = 72 * u.km / u.s / u.Mpc
         self.toas = psr.toas
         self.toaerrs = psr.toaerrs
@@ -902,12 +903,12 @@ class Spectrum_RRF(object):
             raise Exception('Frequencies of the GWB MUST be a subset of the intrinsic red noise frequencies.')
 
         #intrinsic red noise frequencies and psd parameters
-        self.freqs_irn = np.linspace(1/Tspan, freqs_irn_comp/Tspan, freqs_irn_comp)
+        self.freqs_rn = np.linspace(1/Tspan, freqs_irn_comp/Tspan, freqs_irn_comp)
         self.amp = amp_irn
         self.gamma = gamma_irn
 
         #gwb frequencies and psd parameters
-        self.freqs_gwb = self.freqs_irn[:freqs_gw_comp]
+        self.freqs_gwb = self.freqs_rn[:freqs_gw_comp]
         self.amp_gw = amp_gw
         self.gamma_gw = gamma_gw
 
