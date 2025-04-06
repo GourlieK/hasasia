@@ -258,6 +258,17 @@ def get_NcalInv(psr, nf=200, fmin=None, fmax=2e-7, freqs=None,
     else:
         G = np.eye(toas.size)
 
+    if hasattr(psr,'N'):
+        L = jsc.linalg.cholesky(psr.N)            
+        A = jnp.matmul(L,G)
+        del L
+        N_TMM = jnp.matmul(A.T,A)
+        del A
+        NInv_TMM = jnp.linalg.inv(N_TMM)
+    else:
+        NInv_TMM = psr.K_inv
+
+
     Gtilde = np.zeros((ff.size,G.shape[1]),dtype='complex128')
     #N_freqs x N_TOA-N_par
 
@@ -266,16 +277,10 @@ def get_NcalInv(psr, nf=200, fmin=None, fmax=2e-7, freqs=None,
     Gtilde = np.dot(np.exp(1j*2*np.pi*ff[:,np.newaxis]*toas),G)
     # N_freq x N_TOA-N_par
 
-    L = jsc.linalg.cholesky(psr.N)            
-    A = jnp.matmul(L,G)
-    del L
-    Ncal = jnp.matmul(A.T,A)
-    del A
-    NcalInv = jnp.linalg.inv(Ncal)
    
-    TfN = jnp.matmul(np.conjugate(Gtilde),jnp.matmul(NcalInv,Gtilde.T)) / 2
+    TfN = jnp.matmul(np.conjugate(Gtilde),jnp.matmul(NInv_TMM,Gtilde.T)) / 2
     if return_Gtilde_Ncal:
-        return np.real(TfN), Gtilde, Ncal
+        return np.real(TfN), Gtilde, jnp.linalg.inv(NInv_TMM)
     elif full_matrix:
         return np.real(TfN)
     else:
@@ -635,7 +640,11 @@ class Spectrum(object):
         self.toaerrs = psr.toaerrs
         self.phi = psr.phi
         self.theta = psr.theta
-        self.N = psr.N
+        if hasattr(psr, 'N'):
+            self.N = psr.N
+        else:
+            self.K_inv = psr.K_inv
+
         self.G = psr.G
         self.designmatrix = psr.designmatrix
         self.pdist = psr.pdist
