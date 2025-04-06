@@ -7,6 +7,7 @@ import scipy.stats as sps
 import scipy.linalg as sl
 import os, pickle, jax, h5py
 from astropy import units as u
+jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import jax.scipy as jsc
 from functools import cached_property, partial
@@ -20,10 +21,12 @@ __all__ =['GWBSensitivityCurve',
           'DeterSensitivityCurve',
           'Pulsar',
           'Spectrum',
+          'Spectrum_RRF',
           'R_matrix',
           'G_matrix',
           'get_Tf',
           'get_NcalInv',
+          'get_NcalInv_RRF',
           'resid_response',
           'HellingsDownsCoeff',
           'get_Tspan',
@@ -870,7 +873,7 @@ class Spectrum_RRF(object):
         Optionally supply an array of frequencies over which to build the
         various spectral densities.
     """
-    def __init__(self, psr, Tspan, freqs_gw, amp_gw, gamma_gw, freqs_irn, amp_irn = None, gamma_irn = None, nf=400, fmin=None,
+    def __init__(self, psr, Tspan, freqs_gw_comp, amp_gw, gamma_gw, freqs_irn_comp, amp_irn = None, gamma_irn = None, nf=400, fmin=None,
                   fmax=2e-7, freqs=None,  tm_fit=True, **Tf_kwargs):
         self._H_0 = 72 * u.km / u.s / u.Mpc
         self.toas = psr.toas
@@ -886,13 +889,16 @@ class Spectrum_RRF(object):
         self.designmatrix = psr.designmatrix
         self.pdist = psr.pdist
 
+        if freqs_gw_comp > freqs_irn_comp:
+            raise Exception('Frequencies of the GWB MUST be a subset of the intrinsic red noise frequencies.')
+
         #intrinsic red noise frequencies and psd parameters
-        self.freqs_irn = freqs_irn
+        self.freqs_irn = np.linspace(1/Tspan, freqs_irn_comp/Tspan, freqs_irn_comp)
         self.amp = amp_irn
         self.gamma = gamma_irn
 
         #gwb frequencies and psd parameters
-        self.freqs_gwb = freqs_gw
+        self.freqs_gwb = self.freqs_irn[:freqs_gw_comp]
         self.amp_gw = amp_gw
         self.gamma_gw = gamma_gw
 
@@ -905,7 +911,6 @@ class Spectrum_RRF(object):
             self.freqs = np.logspace(np.log10(fmin), np.log10(fmax), nf)
         else:
             self.freqs = freqs
-
         self._psd_prefit = np.zeros_like(self.freqs)
 
     def psd_postfit(self):
@@ -972,8 +977,8 @@ class Spectrum_RRF(object):
         mask = np.full(self.freqs_irn.size, False)
         for i in range(self.freqs_irn.size):
             for j in range(self.freqs_gwb.size):
-                #assumption here is that GB frequencies is a subset of IRN frequencies with tolerance or 10^-5 difference
-                if np.isclose(self.freqs_irn[i], self.freqs_gwb[j], rtol=1e-5, atol=0):
+                #assumption here is that GB frequencies is a subset of IRN frequencies 
+                if self.freqs_irn[i] == self.freqs_gwb[j]:
                     mask[i] = True
                     continue
         #duplicates the mask for use of 2Nfreq formalism
