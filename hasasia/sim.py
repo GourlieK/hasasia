@@ -2,9 +2,8 @@
 from __future__ import print_function
 """Main module."""
 import numpy as np
-#changed from .sensitity and .utils
-from sensitivity import Pulsar, red_noise_powerlaw, corr_from_psd
-from utils import create_design_matrix
+from .sensitivity import Pulsar, red_noise_powerlaw, corr_from_psd
+from .utils import create_design_matrix
 __all__ = ['sim_pta',
            ]
 
@@ -12,8 +11,8 @@ day_sec = 24*3600
 yr_sec = 365.25*24*3600
 
 def sim_pta(timespan, cad, sigma, phi, theta, Npsrs=None,
-            A_rn=None, alpha=None, freqs=None, uneven=False, A_gwb=None,
-            fast=True,
+            A_rn=None, alpha=None, freqs=None, uneven=False,
+            A_gwb=None, alpha_gwb = -2/3, fast=True, psr_names = None,
             kwastro={'RADEC':True, 'PROPER':True, 'PX':True}):
     """
     Make a simulated pulsar timing array. Using the available parameters,
@@ -99,6 +98,8 @@ def sim_pta(timespan, cad, sigma, phi, theta, Npsrs=None,
     psrs = []
     err_dim = pars['sigma'].ndim
     Timespan = np.amax(pars['timespan'])
+    if psr_names is None:
+        psr_names = [None for _ in range(Npsrs)]
     for ii in range(Npsrs):
         tspan = pars['timespan'][ii]
         Ntoas = int(np.floor(tspan*pars['cad'][ii]))
@@ -122,14 +123,22 @@ def sim_pta(timespan, cad, sigma, phi, theta, Npsrs=None,
 
         if A_gwb is not None:
             gwb = red_noise_powerlaw(A=A_gwb,
-                                     alpha=-2/3.,
+                                     alpha=alpha_gwb,
                                      freqs=freqs)
             N += corr_from_psd(freqs=freqs, psd=gwb, toas=toas, fast=fast)
 
         M = create_design_matrix(toas, **kwastro)
-
-        p = Pulsar(toas, toaerrs, phi=pars['phi'][ii],
-                   theta=pars['theta'][ii], designmatrix=M, N=N)
+        # FIXME to always loop over A_rn
+        if 'A_rn' in keys:
+            A_rn = pars['A_rn'][ii]
+            alpha = pars['alpha'][ii] 
+        else: 
+            A_rn = None
+        
+        p = Pulsar(toas, toaerrs, name=psr_names[ii],
+                   phi=pars['phi'][ii], theta=pars['theta'][ii], 
+                   A_rn=A_rn, alpha=alpha,
+                   designmatrix=M, N=N)
         psrs.append(p)
 
     return psrs
